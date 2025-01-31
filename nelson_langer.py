@@ -1,22 +1,24 @@
 import numpy as np
+import torch
 from scipy.integrate import solve_ivp
-from torch import sparse_coo_tensor
-from torch.linalg import matmul
+import matplotlib.pyplot as plt
+
+T: float = 5000; # Temperature
+Av: float = 5; # Visual Extinction
+G0: float = 1; # Standard Interstellar Value
+shield: int = 5; # CO self-shielding factor
+n_h: float = 1e2; # hydrogen number density
 
 def build_tensors():
 
-    # Parameters
-    T: float = 1; # Temperature
-    Av: float = 1; # Visual Extinction
-    G0: float = 1; # Standard Interstellar Value
-    shield: int = 1; # CO self-shielding factor
-    n_h: float = 1e5; # hydrogen number density
+    # Build 3rd order sparse tensor Q and 2nd order sparse matrix L.
+    # Eventually I think we would like to load this in via some data file.
 
-    # s = [H_2, H_3^+, e, He, He^+, C, CH_x, O, OH_x, CO, HCO^+, C^+, M^+, M]
-    #      0    1      2  3   4     5  6     7  8     9   10     11   12   13
 
-    # Build 3rd order sparse tensor Q and 2nd order sparse matrix L
-    indices_Q = [
+    # [H_2, H_3^+, e, He, He^+, C, CH_x, O, OH_x, CO, HCO^+, C^+, M^+, M]
+    #  0    1      2  3   4     5  6     7  8     9   10     11   12   13
+
+    indices_Q = np.array([
         [0,1,2], #1
         [0,1,9], #2
         [0,1,5], #3
@@ -69,9 +71,9 @@ def build_tensors():
         [12,1,13], #50
         [13,12,2], #51
         [13,1,13] #52
-    ]
+    ])
 
-    values_Q = [
+    values_Q = np.array([
         -1.9e-6/(T**0.54), #1
         1.7e-9, #2
         2e-9, #3
@@ -124,10 +126,10 @@ def build_tensors():
         2e-9, #50
         3.8e-10/(T**0.65), #51
         -2e-9 #52
-    ]
+    ])
     values_Q = values_Q * n_h
 
-    indices_L = [
+    indices_L = np.array([
         [0,0],  #1
         [1,0],  #2
         [2,0],  #3
@@ -149,9 +151,9 @@ def build_tensors():
         [11,5], #19
         [12,13],#20
         [13,13] #21
-    ]
+    ])
 
-    values_L = [
+    values_L = np.array([
         -1.2e-17, #1
         1.2e-17, #2
         1.2e-17, #3
@@ -173,38 +175,49 @@ def build_tensors():
         3e-10*G0*np.exp(-3*Av), #19
         2e-10*G0*np.exp(-1.9*Av), #20
         -2e-10*G0*np.exp(-1.9*Av) #21
-    ]
+    ])
 
-    Q = sparse_coo_tensor(indices=indices_Q, values=values_Q, size=(14,14,14))
-    L = sparse_coo_tensor(indices=indices_L, values=values_L, size=(14,14))
+    Q = torch.sparse_coo_tensor(indices=indices_Q.transpose().tolist(), values=values_Q.transpose().tolist(), size=(14,14,14), dtype=torch.float64)
+    L = torch.sparse_coo_tensor(indices=indices_L.transpose().tolist(), values=values_L.transpose().tolist(), size=(14,14), dtype=torch.float64)
 
     return Q,L
-        
+
+
+Q, L = build_tensors()
+Q_dense = Q.to_dense()
 def nelson_langer(t,x):
-    N = 14
-    Q,L = build_tensors()
-    Q_dense = Q.to_dense()
-    L_dense = L.to_dense()
-    Q_reduced = np.zeros((N,N))
-    for k in range(N):
-        Q_reduced += x[k]*Q_dense[:,:,k]
-    return matmul(L_dense + Q_reduced, x)
+    xt = torch.from_numpy(x)
+    Q2 = torch.tensordot(Q_dense, xt, dims=([2],[0]))
+    return torch.linalg.matmul(Q2 + L, xt).numpy()
 
 def jacobian(t,x):
-    N = 14
-    Q,L = build_tensors()
+    xt = torch.from_numpy()
     for k in range(N):
         L += x[k]*(Q[:,:,k] + Q[:,k,:]).numpy()
     return L
 
-x0 = 1e10 * np.ones(14)
-soln = solve_ivp(nelson_langer, (0.0,1.0), x0, method='RK45')
+x0 = (1e2 * np.random.rand(14) + 1) / n_h
+soln = solve_ivp(nelson_langer, [0,5e7], x0, method='RK45')
 
-# def Jacobian(t,s):
-#     return np.array(tf.math.add(L*s, Q*np.outer(s,s)))
+species = [
+    '$H_2$',   #0
+    '$H_3^+$', #1
+    '$e$',     #2
+    '$He$',    #3
+    '$He^+$',  #4
+    '$C$',     #5
+    '$CH_x$',  #6
+    '$O$',     #7
+    '$OH_x$',  #8
+    '$CO$',    #9
+    '$HCO^+$', #10
+    '$C^+$',   #11
+    '$M^+$',   #12
+    '$M$'      #13
+]
 
-# tspan = [0, 1]
-# s0 = [0,   0,     0, 0,  0,    0, 0,    0, 0,    0,  0,     0,   0,   0]
-# #    [H_2, H_3^+, e, He, He^+, C, CH_x, O, OH_x, CO, HCO^+, C^+, M^+, M]
-
-# sol = solve_ivp(Jacobian, t_span=tspan, y0=s0, method='RK45')
+fig, ax = plt.subplots()
+for j in range(14):
+    ax.plot(soln.t, soln.y[j,:], label=species[j])
+ax.legend()
+plt.show()
