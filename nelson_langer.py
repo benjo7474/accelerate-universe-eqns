@@ -1,19 +1,20 @@
+# %%
+
 import numpy as np
 import torch
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 
-T: float = 5000; # Temperature
-Av: float = 5; # Visual Extinction
-G0: float = 1; # Standard Interstellar Value
-shield: int = 5; # CO self-shielding factor
-n_h: float = 1e2; # hydrogen number density
+T: float = 10; # Temperature
+Av: float = 2; # Visual Extinction
+G0: float = 1.7; # Standard Interstellar Value
+shield: int = 1; # CO self-shielding factor
+n_h: float = 611; # hydrogen number density
 
 def build_tensors():
 
     # Build 3rd order sparse tensor Q and 2nd order sparse matrix L.
-    # Eventually I think we would like to load this in via some data file.
-
+    # Eventually we would like to load this in via some data file.
 
     # [H_2, H_3^+, e, He, He^+, C, CH_x, O, OH_x, CO, HCO^+, C^+, M^+, M]
     #  0    1      2  3   4     5  6     7  8     9   10     11   12   13
@@ -185,19 +186,62 @@ def build_tensors():
 
 Q, L = build_tensors()
 Q_dense = Q.to_dense()
-def nelson_langer(t,x):
+N = 14
+
+def nelson_langer_wrapper(t, x: np.ndarray) -> np.ndarray:
+    # takes a vector from numpy and returns vector from numpy
     xt = torch.from_numpy(x)
-    Q2 = torch.tensordot(Q_dense, xt, dims=([2],[0]))
-    return torch.linalg.matmul(Q2 + L, xt).numpy()
+    return nelson_langer(xt).numpy()
 
-def jacobian(t,x):
-    xt = torch.from_numpy()
-    for k in range(N):
-        L += x[k]*(Q[:,:,k] + Q[:,k,:]).numpy()
-    return L
+def nelson_langer(x: torch.tensor) -> torch.tensor:
+    # takes a vector from torch and does computation
+    Q2 = torch.tensordot(Q_dense, x, dims=([2],[0]))
+    return torch.linalg.matmul(Q2 + L, x)
 
-x0 = (1e2 * np.random.rand(14) + 1) / n_h
-soln = solve_ivp(nelson_langer, [0,5e7], x0, method='RK45')
+def jacobian(x: torch.tensor) -> torch.tensor:
+    # takes a vector from torch, returns torch
+    return torch.tensordot(Q_dense, x, dims=([1],[0])) + torch.tensordot(Q_dense, x, dims=([2],[0])) + L
+
+def jacobian_wrapper(t, x: np.ndarray) -> np.ndarray:
+    # takes vector from numpy, returns numpy
+    xt = torch.from_numpy(x)
+    return jacobian(xt).numpy()
+
+def check_normality(J: np.ndarray):
+    # takes a rank 2 tensor in torch and returns ||J*(J^T) - (J^T)*J||
+    Jtorch = torch.from_numpy(J)
+    Jtranspose = torch.transpose(Jtorch, 0, 1)
+    print(Jtranspose*J)
+    return torch.linalg.matrix_norm(Jtorch*Jtranspose - Jtranspose*Jtorch, ord='fro')
+
+
+
+
+
+
+# %% Run solution & plot
+
+# np.random.seed(0)
+# x0 = (n_h * np.random.rand(14) + 1) / n_h
+x0 = np.array([
+    0.5,
+    9.059e-9,
+    2e-4,
+    0.1,
+    7.866e-7,
+    0.0,
+    0.0,
+    0.0004,
+    0.0,
+    0.0,
+    0.0,
+    0.0002,
+    2.0e-7,
+    2.0e-7
+])
+
+teval = np.linspace(start=0, stop=5e7, num=501)
+soln = solve_ivp(nelson_langer_wrapper, [0,5e7], x0, method='BDF', rtol=1e-12, jac=jacobian_wrapper, t_eval=teval)
 
 species = [
     '$H_2$',   #0
@@ -216,8 +260,44 @@ species = [
     '$M$'      #13
 ]
 
+# Plot everything on log scale
 fig, ax = plt.subplots()
 for j in range(14):
     ax.plot(soln.t, soln.y[j,:], label=species[j])
 ax.legend()
+ax.set_yscale('log')
 plt.show()
+
+# NEW: take SVD of solution matrix
+U, S, Vh = np.linalg.svd(soln.y)
+print(S)
+
+
+
+# %% Check normality of Jacobian matrix 
+N = 100
+norms = np.zeros(N)
+
+for k in range(N):
+    x = (n_h * np.random.rand(14) + 1) / n_h
+    norms[k] = check_normality(jacobian_wrapper(0,x))
+
+fig, ax = plt.subplots()
+ax.plot(range(N), norms)
+plt.show()
+print(norms)
+
+
+
+# %% Investigate eigenvalues of Jacobian
+x = (n_h * np.random.rand(14) + 1) / n_h
+secs_per_year = 3600 * 24 * 365
+soln = solve_ivp(nelson_langer_wrapper, [0, 3e4*secs_per_year], x0, method='RK45', rtol=1e-16)
+J = jacobian_wrapper(0, soln.y[:,-1])
+D, V = np.linalg.eig(J)
+
+plt.semilogy(np.linspace(1, np.size(D), np.size(D)), np.absolute(D))
+plt.show()
+print(D)
+
+# %%
