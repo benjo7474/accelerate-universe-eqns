@@ -94,12 +94,29 @@ plt.show()
 U, S, Vh = np.linalg.svd(soln.y)
 
 
+# %% Check conservation conditions
+
+# charge conservation: n(e) = n(H_3^+) + n(He^+) + n(HCO^+) + n(C^+) + n(M^+)
+net_charge = soln.y[1,:] + soln.y[4,:] + soln.y[10,:] + soln.y[11,:] + soln.y[12,:] - soln.y[2,:]
+# helium conservation: n(He) + n(He^+) = constant
+He_total = soln.y[3,:] + soln.y[4,:]
+# metal conservation: n(M) + n(M^+) = constant
+M_total = soln.y[12,:] + soln.y[13,:]
+# carbon conservation: n(C) + n(C^+) + n(CH_x) + n(C0) + n(HCO^+)
+C_total = soln.y[5,:] + soln.y[6,:] + soln.y[9,:] + soln.y[10,:] + soln.y[11,:]
+# oxygen conservation: n(O) + 
+O_total = soln.y[7,:] + soln.y[8,:] + soln.y[9,:] + soln.y[10,:]
+# hydrogen conservation: skeptical this works because we don't track H in the reactions
+H_total = soln.y[0,:] + soln.y[1,:] + soln.y[6,:] + soln.y[8,:] + soln.y[10,:]
+
+# Can (and will) make these equations a matrix but it is kind of a lot of work for now
+
 # %% Check normality of Jacobian matrix 
 N = 100
 norms = np.zeros(N)
 
 for k in range(N):
-    x = (n_h * np.random.rand(14) + 1) / n_h
+    x = np.random.rand(14)
     norms[k] = check_normality(jacobian_wrapper(0,x))
 
 fig, ax = plt.subplots()
