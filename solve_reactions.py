@@ -1,34 +1,9 @@
 # %%
-
 import numpy as np
 import torch
-from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
-from nelson_langer_network import nelson_langer_network
+from nelson_langer_network import build_nelson_network
 
-
-Q, L = nelson_langer_network.build_tensors()
-Q_dense = Q.to_dense()
-N = 14
-
-def nelson_langer_wrapper(t, x: np.ndarray) -> np.ndarray:
-    # takes a vector from numpy and returns vector from numpy
-    xt = torch.from_numpy(x)
-    return nelson_langer(xt).numpy()
-
-def nelson_langer(x: torch.tensor) -> torch.tensor:
-    # takes a vector from torch and does computation
-    Q2 = torch.tensordot(Q_dense, x, dims=([2],[0]))
-    return torch.linalg.matmul(Q2 + L, x)
-
-def jacobian(x: torch.tensor) -> torch.tensor:
-    # takes a vector from torch, returns torch
-    return torch.tensordot(Q_dense, x, dims=([1],[0])) + torch.tensordot(Q_dense, x, dims=([2],[0])) + L
-
-def jacobian_wrapper(t, x: np.ndarray) -> np.ndarray:
-    # takes vector from numpy, returns numpy
-    xt = torch.from_numpy(x)
-    return jacobian(xt).numpy()
 
 def check_normality(J: np.ndarray):
     # takes a rank 2 tensor in torch and returns ||J*(J^T) - (J^T)*J||
@@ -40,6 +15,21 @@ def check_normality(J: np.ndarray):
 
 
 # %% Run solution & plot
+
+# Model parameters
+Av: float = 2; # Visual Extinction
+G0: float = 1.7; # Standard Interstellar Value
+shield: int = 1; # CO self-shielding factor
+n_h: float = 611; # hydrogen number density
+T: float = 10; # Temperature
+
+# Can also load random params for n_h and T
+A = np.load('np-states.npy')
+j = np.random.randint(low=0, high=A.shape[0])
+n_h = 2*A[j,0]
+T = A[j,1]
+G0 = A[j,3]  # /8.94e-14 ?
+print(f'n_h: {n_h} \t T: {T} \t G0: {G0}')
 
 # Initial condition for NL99 from Despodic
 x0 = np.array([
@@ -61,9 +51,9 @@ x0 = np.array([
 
 secs_per_year = 3600*24*365
 tf = 30000 * secs_per_year
-teval = np.linspace(start=0, stop=tf, num=5000)
-soln = solve_ivp(nelson_langer_wrapper, [0,tf], x0, method='BDF',
-            rtol=1e-16, jac=jacobian_wrapper, max_step=tf/100, t_eval=teval)
+# teval = np.linspace(start=0, stop=tf, num=5000)
+nelson_langer_network = build_nelson_network()
+soln = nelson_langer_network.solve_reaction([0, tf], x0)
 
 species = [
     '$H_2$',   #0
@@ -94,13 +84,30 @@ plt.show()
 U, S, Vh = np.linalg.svd(soln.y)
 
 
+# %% Check conservation conditions
+
+# charge conservation: n(e) = n(H_3^+) + n(He^+) + n(HCO^+) + n(C^+) + n(M^+)
+net_charge = soln.y[1,:] + soln.y[4,:] + soln.y[10,:] + soln.y[11,:] + soln.y[12,:] - soln.y[2,:]
+# helium conservation: n(He) + n(He^+) = constant
+He_total = soln.y[3,:] + soln.y[4,:]
+# metal conservation: n(M) + n(M^+) = constant
+M_total = soln.y[12,:] + soln.y[13,:]
+# carbon conservation: n(C) + n(C^+) + n(CH_x) + n(C0) + n(HCO^+)
+C_total = soln.y[5,:] + soln.y[6,:] + soln.y[9,:] + soln.y[10,:] + soln.y[11,:]
+# oxygen conservation: n(O) + 
+O_total = soln.y[7,:] + soln.y[8,:] + soln.y[9,:] + soln.y[10,:]
+# hydrogen conservation: skeptical this works because we don't track H in the reactions
+H_total = soln.y[0,:] + soln.y[1,:] + soln.y[6,:] + soln.y[8,:] + soln.y[10,:]
+
+# Can (and will) make these equations a matrix but it is kind of a lot of work for now
+
 # %% Check normality of Jacobian matrix 
 N = 100
 norms = np.zeros(N)
 
 for k in range(N):
-    x = (n_h * np.random.rand(14) + 1) / n_h
-    norms[k] = check_normality(jacobian_wrapper(0,x))
+    x = np.random.rand(14)
+    norms[k] = check_normality(nelson_langer_network.jacobian(0,x))
 
 fig, ax = plt.subplots()
 ax.plot(range(N), norms)
@@ -112,8 +119,8 @@ print(norms)
 # %% Investigate eigenvalues of Jacobian
 x = np.random.rand(14)
 secs_per_year = 3600 * 24 * 365
-soln = solve_ivp(nelson_langer_wrapper, [0, 3e4*secs_per_year], x0, method='RK45', rtol=1e-16)
-J = jacobian_wrapper(0, soln.y[:,-1])
+soln = nelson_langer_network.solve_reaction([0, 3e4*secs_per_year], x0)
+J = nelson_langer_network.jacobian(0, soln.y[:,-1])
 D, V = np.linalg.eig(J)
 
 plt.semilogy(np.linspace(1, np.size(D), np.size(D)), np.absolute(D))
