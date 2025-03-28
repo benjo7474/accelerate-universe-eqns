@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+from scipy.integrate import solve_ivp
 
 class Reaction:
     # Represents a reaction of course
@@ -42,9 +42,15 @@ class ReactionNetwork:
     # Holds a whole bunch of reactions
 
     # Constructor: takes in a bunch of reactions
-    def __init__(self, num_species, *reactions: Reaction):
+    def __init__(self, num_species, n_h, *reactions: Reaction):
         self.reactions = reactions
         self.num_species = num_species
+        self.n_h = n_h
+        Q, L = self.build_tensors()
+        self.Q = Q
+        self.L = L
+        self.Q_dense = Q.to_dense() # why does this not always work?!?!?!?!
+        # updated pytorch -- that might have fixed the issue
 
     def num_nonzero_entries(self):
         N_L = 0
@@ -77,9 +83,38 @@ class ReactionNetwork:
                 values_Q[j_Q:j_Q+N] = values
                 j_Q += N
         
+        values_Q *= self.n_h
         Q = torch.sparse_coo_tensor(indices=indices_Q.transpose().tolist(), values=values_Q.transpose().tolist(),
                                     size=(self.num_species, self.num_species, self.num_species), dtype=torch.float64)
         L = torch.sparse_coo_tensor(indices=indices_L.transpose().tolist(), values=values_L.transpose().tolist(),
                                     size=(self.num_species, self.num_species), dtype=torch.float64)
         return Q, L
     
+    def reaction_rhs(self, t, x: np.ndarray) -> np.ndarray:
+        # takes a vector from numpy and returns vector from numpy
+        xt = torch.from_numpy(x)
+        return self.reaction_rhs_torch(xt).numpy()
+
+    def reaction_rhs_torch(self, x: torch.tensor) -> torch.tensor:
+        # takes a vector from torch and does computation
+        Q2 = torch.tensordot(self.Q_dense, x, dims=([2],[0]))
+        return torch.linalg.matmul(Q2 + self.L, x)
+
+    def jacobian_torch(self, x: torch.tensor) -> torch.tensor:
+        # takes a vector from torch, returns torch
+        return torch.tensordot(self.Q_dense, x, dims=([1],[0])) + torch.tensordot(self.Q_dense, x, dims=([2],[0])) + self.L
+
+    def jacobian(self, t, x: np.ndarray) -> np.ndarray:
+        # takes vector from numpy, returns numpy
+        xt = torch.from_numpy(x)
+        return self.jacobian_torch(xt).numpy()
+    
+    def solve_reaction(self, t_range, x0):
+        soln = solve_ivp(self.reaction_rhs, t_range, x0, method='LSODA',
+            rtol=1e-10,
+            jac=self.jacobian,
+            max_step=(t_range[1]-t_range[0])/1e3,
+            first_step=(t_range[1]-t_range[0])/1e12)
+        return soln.t, soln.y
+
+        
