@@ -59,17 +59,25 @@ class AstrochemClusterModel:
 
             ss_new = ss
             if params_in_cluster.shape[0] < ss:
-                # Cluster error is not converging in this case. This is a big issue
                 ss_new = params_in_cluster.shape[0]
             
-            param_sample = params_in_cluster.sample(ss_new)
             centroid_params = centroids[j]
             qc = self._solve_nelson_network(centroid_params, x0, QoI, time)
 
-            # Compute max statistic via max_{j=1,...,ss}(q_c - q_j) / q_c
+            # Compute error via max_{j=1,...,ss}(q_c - q_j) / q_c
+            # param_sample = params_in_cluster.sample(ss_new)
+            # dvec = np.empty(shape=ss_new)
+            # for i, row in param_sample.reset_index(drop=True).iterrows():
+            #     qi = self._solve_nelson_network(row.to_numpy(), x0, QoI, time)
+            #     dvec[i] = np.abs(qc-qi)
+            # error = np.max(dvec) / qc
+
+            # Compute error by taking largest distances away and averaging errors
+            distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster.to_numpy(), axis=1)
+            largest_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
             dvec = np.empty(shape=ss_new)
-            for i, row in param_sample.reset_index(drop=True).iterrows():
-                qi = self._solve_nelson_network(row.to_numpy(), x0, QoI, time)
+            for i, row in enumerate(params_in_cluster.to_numpy()[largest_indices,:]):
+                qi = self._solve_nelson_network(row, x0, QoI, time)
                 dvec[i] = np.abs(qc-qi)
             error = np.max(dvec) / qc
 
@@ -206,19 +214,37 @@ class AstrochemClusterModel:
         return k
     
     def predict(self, parameters: np.ndarray):
-        # input is a N*3 matrix with the un-normalized parameters
+        # input is a N*3 matrix with the UN-NORMALIZED parameters
         # output is the predicted value based on cluster model
         if self.model_trained == False:
             return None
         
-        predicted_vals = np.zeros(shape=len(parameters))
+        predicted_vals = np.zeros(shape=(len(parameters),2))
         params_normalized = (parameters - self.mean.to_numpy()) / self.std.to_numpy()
         j = 0
         for param_row in params_normalized:
             # go down the tree to find which cluster we are in
-            predicted_vals[j] = self._search_tree(param_row)
+            predicted_vals[j,0], predicted_vals[j,1] = self._search_tree(param_row)
             j += 1
         
+        return predicted_vals
+    
+    def predict_with_loop(self, parameters: np.ndarray):
+        predicted_vals = np.zeros(shape=(len(parameters),2))
+        centroids, QoI_values = self.flatten_cluster_centers()
+        params_normalized = (parameters - self.mean.to_numpy()) / self.std.to_numpy()
+        # col1 is predicted value, col2 is actual value, col3 is percent error
+        k = 0
+        for row in params_normalized: # row is the parameters
+            dvec = np.zeros(len(centroids))
+            j = 0
+            for centroid in centroids:
+                dvec[j] = np.linalg.norm(centroid - row)
+                j += 1
+            predicted_cluster = np.argmin(dvec)
+            predicted_vals[k,0] = QoI_values[predicted_cluster]
+            predicted_vals[k,1] = predicted_cluster
+            k += 1
         return predicted_vals
     
 
@@ -235,7 +261,7 @@ class AstrochemClusterModel:
     
     def _search_tree_recursion(self, param_row, tree):
         if type(tree) == Cluster:
-            return tree.QoI_value
+            return tree.QoI_value, tree.index
         elif type(tree) == ClusterTree:
             left_distance = np.linalg.norm(tree.left.params - param_row)
             right_distance = np.linalg.norm(tree.right.params - param_row)

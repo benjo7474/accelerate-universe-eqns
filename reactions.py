@@ -109,12 +109,13 @@ class ReactionNetwork:
         xt = torch.from_numpy(x)
         return self.jacobian_torch(xt).numpy()
     
-    def solve_reaction(self, t_range, x0):
+    def solve_reaction(self, t_range, x0, t_eval = None):
         soln = solve_ivp(self.reaction_rhs, t_range, x0, method='LSODA',
             rtol=1e-10,
             jac=self.jacobian,
             max_step=(t_range[1]-t_range[0])/1e3,
-            first_step=(t_range[1]-t_range[0])/1e12)
+            first_step=(t_range[1]-t_range[0])/1e12,
+            t_eval=t_eval)
         return soln.t, soln.y
 
         
