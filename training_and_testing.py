@@ -46,23 +46,25 @@ def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: int, time:
 
 
 
-# %% Train model
+# %% Load data
 
 foo = np.load('data/small_dataset.npy')
 small_dataset = pd.DataFrame(data=foo, columns=['$\log(n_h)$', '$\log(T)$', '$G_0$'])
 
+np.random.seed(1234)
 msk = np.random.rand(len(small_dataset)) > 0.2
 train = small_dataset[msk]
 test = small_dataset[~msk]
 
+# %% Train model
+
 start_time = time.perf_counter()
-surrogate = AstrochemClusterModel(train.reset_index(drop=True))
-surrogate.train_surrogate_model(0.1, 9, x0, tf, 10, 10)
+surrogate = AstrochemClusterModel()
+surrogate.train_surrogate_model(train.reset_index(drop=True), 0.05, 9, x0, tf, 10, 10)
 end_time = time.perf_counter()
 
 total_time = end_time - start_time # in seconds
 print(f'Training time: {total_time:.2f} seconds')
-centroids, QoI_values = surrogate.flatten_cluster_centers()
 
 
 # %% If we want to save the surrogate, we need to use pickle 
@@ -94,7 +96,7 @@ print(f'Mean: {np.mean(datamat[:,3])}')
 print(f'Median: {np.median(datamat[:,3])}')
 print(f'Max: {np.max(datamat[:,3])}')
 print(f'STD: {np.std(datamat[:,3])}')
-num_vals_outside_error = (datamat[:,3] > 0.1).sum()
+num_vals_outside_error = (datamat[:,3] > 0.05).sum()
 print(f'# of points outside error: {num_vals_outside_error} ({num_vals_outside_error/len(datamat[:,2])}% of data)')
 
 

@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import sklearn.cluster
 from nelson_langer_network import build_nelson_network
+import faiss
+
 
 class ClusterTree:
 
@@ -24,17 +26,12 @@ class Cluster:
 
 class AstrochemClusterModel:
 
-    def __init__(self, params):
-        self.mean = params.mean()
-        self.std = params.std()
-        self.params = params
-        self.params_normalized = (self.params - self.mean) / self.std
-        self.tree = []
-        self.labels = []
+    def __init__(self):
         self.N_clusters = 0
         self.model_trained = False
 
     def train_surrogate_model(self,
+        training_data,
         error_tol: float,
         QoI: int,
         x0: np.ndarray, # initial condition for ode solves
@@ -44,18 +41,23 @@ class AstrochemClusterModel:
         ):
         # Computes the clusters recursively, and makes smaller based on error_tol.
 
+        # first process the parameters
+        self.mean = training_data.mean()
+        self.std = training_data.std()
+        training_data_normalized = (training_data - self.mean) / self.std
+
         k = 0
-        indices = np.full(shape=self.params_normalized.shape[0], fill_value=-1)
+        indices = np.full(shape=training_data_normalized.shape[0], fill_value=-1)
 
         kmeans = sklearn.cluster.KMeans(n_clusters=N, random_state=1)
-        labels = kmeans.fit_predict(self.params_normalized[['$\log(n_h)$', '$\log(T)$', '$G_0$']])
+        labels = kmeans.fit_predict(training_data_normalized[['$\log(n_h)$', '$\log(T)$', '$G_0$']])
         centroids = kmeans.cluster_centers_
         cluster_structure = np.empty(shape=N, dtype=object)
 
         for j in range(N):
 
             # Compute error inside each cluster
-            params_in_cluster = self.params_normalized[labels==j]
+            params_in_cluster = training_data_normalized[labels==j]
 
             ss_new = ss
             if params_in_cluster.shape[0] < ss:
@@ -73,6 +75,7 @@ class AstrochemClusterModel:
             # error = np.max(dvec) / qc
 
             # Compute error by taking largest distances away and averaging errors
+            # can make this block wayyyy faster using either faiss or matrices
             distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster.to_numpy(), axis=1)
             largest_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
             dvec = np.empty(shape=ss_new)
@@ -93,8 +96,15 @@ class AstrochemClusterModel:
 
         self.N_clusters = k
         self.indices = indices
-        self.tree = cluster_structure # note that the tree has the normalized cluster centers
         self.model_trained = True
+
+        # we return the tree structure. It is likely more beneficial to return nothing and instead
+        # create a faiss tree structure to search for the closest cluster.
+        # first flatten
+        all_centroids, self.QoI_values = self._flatten_cluster_centers(cluster_structure)
+        # put this into faiss
+        self.faiss_index = faiss.IndexFlatL2(3)
+        self.faiss_index.add(all_centroids)
 
         return k, indices, cluster_structure
 
@@ -188,11 +198,11 @@ class AstrochemClusterModel:
         return yvec[QoI, -1]
     
 
-    def flatten_cluster_centers(self):
+    def _flatten_cluster_centers(self, tree):
         centroids = np.zeros(shape=(self.N_clusters, 3))
         QoI_values = np.zeros(shape=self.N_clusters)
         k = 0
-        for val in self.tree:
+        for val in tree:
             if type(val) == Cluster:
                 centroids[k] = val.params
                 QoI_values[k] = val.QoI_value
@@ -212,39 +222,15 @@ class AstrochemClusterModel:
             k = self._flatten_cluster_centers_recursion(tree.left, k, centroids, QoI_values)
             k = self._flatten_cluster_centers_recursion(tree.right, k, centroids, QoI_values)
         return k
+
     
     def predict(self, parameters: np.ndarray):
-        # input is a N*3 matrix with the UN-NORMALIZED parameters
-        # output is the predicted value based on cluster model
-        if self.model_trained == False:
-            return None
-        
         predicted_vals = np.zeros(shape=(len(parameters),2))
         params_normalized = (parameters - self.mean.to_numpy()) / self.std.to_numpy()
-        j = 0
-        for param_row in params_normalized:
-            # go down the tree to find which cluster we are in
-            predicted_vals[j,0], predicted_vals[j,1] = self._search_tree(param_row)
-            j += 1
-        
-        return predicted_vals
-    
-    def predict_with_loop(self, parameters: np.ndarray):
-        predicted_vals = np.zeros(shape=(len(parameters),2))
-        centroids, QoI_values = self.flatten_cluster_centers()
-        params_normalized = (parameters - self.mean.to_numpy()) / self.std.to_numpy()
-        # col1 is predicted value, col2 is actual value, col3 is percent error
-        k = 0
-        for row in params_normalized: # row is the parameters
-            dvec = np.zeros(len(centroids))
-            j = 0
-            for centroid in centroids:
-                dvec[j] = np.linalg.norm(centroid - row)
-                j += 1
-            predicted_cluster = np.argmin(dvec)
-            predicted_vals[k,0] = QoI_values[predicted_cluster]
-            predicted_vals[k,1] = predicted_cluster
-            k += 1
+        _, I = self.faiss_index.search(params_normalized, 1)
+        I = np.matrix.flatten(I)
+        predicted_vals[:,1] = I
+        predicted_vals[:,0] = self.QoI_values[I]
         return predicted_vals
     
 
