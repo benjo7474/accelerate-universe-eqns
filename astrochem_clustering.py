@@ -45,6 +45,7 @@ class AstrochemClusterModel:
         self.mean = training_data.mean()
         self.std = training_data.std()
         training_data_normalized = (training_data - self.mean) / self.std
+        self.QoI_length = len(QoI)
 
         k = 0
         indices = np.full(shape=training_data_normalized.shape[0], fill_value=-1)
@@ -75,16 +76,16 @@ class AstrochemClusterModel:
             # error = np.max(dvec) / qc
 
             # Compute error by taking largest distances away and averaging errors
-            # can make this block wayyyy faster using either faiss or matrices
+            # This is where a batch solver can come into handy
             distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster.to_numpy(), axis=1)
             largest_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
-            dvec = np.empty(shape=ss_new)
+            dvec = np.empty(shape=(ss_new, len(QoI)))
             for i, row in enumerate(params_in_cluster.to_numpy()[largest_indices,:]):
                 qi = self._solve_nelson_network(row, x0, QoI, time)
-                dvec[i] = np.abs(qc-qi)
-            error = np.max(dvec) / qc
+                dvec[i,:] = np.abs(qc-qi)
+            error = np.max(dvec / qc)
 
-            if error > error_tol:
+            if (error > error_tol).any():
                 # Split cluster in half (recursive step)
                 k, cluster_structure[j] = self._compute_clusters_recursion_helper(
                         params_in_cluster, centroid_params, error_tol, QoI, x0, time, indices, ss=ss, k=k)
@@ -135,18 +136,20 @@ class AstrochemClusterModel:
             # Can alternatively just use this as a cluster
             ss_new = params_in_cluster_0.shape[0]
 
-        param_sample = params_in_cluster_0.sample(ss_new)
         centroid_params = centroids[0]
         qc = self._solve_nelson_network(centroid_params, x0, QoI, time)
 
-        # Compute max statistic via max_{j=1,...,ss}(q_c - q_j) / q_c
-        dvec = np.empty(shape=ss_new)
-        for i, row in param_sample.reset_index(drop=True).iterrows():
-            qi = self._solve_nelson_network(row.to_numpy(), x0, QoI, time)
-            dvec[i] = np.abs(qc-qi)
-        error = np.max(dvec) / qc
+        # Compute error by taking largest distances away and averaging errors
+        # can make this block wayyyy faster using either faiss or matrices
+        distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_0.to_numpy(), axis=1)
+        largest_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
+        dvec = np.empty(shape=(ss_new, len(QoI)))
+        for i, row in enumerate(params_in_cluster_0.to_numpy()[largest_indices,:]):
+            qi = self._solve_nelson_network(row, x0, QoI, time)
+            dvec[i,:] = np.abs(qc-qi)
+        error = np.max(dvec / qc)
 
-        if error > error_tol:
+        if (error > error_tol).any():
             # Split cluster in half (recursive step)
             k, left = self._compute_clusters_recursion_helper(
                     params_in_cluster_0, centroid_params, error_tol, QoI, x0, time, indices, ss=ss, k=k)
@@ -164,18 +167,20 @@ class AstrochemClusterModel:
             # Cluster error is not converging in this case. This is a big issue
             ss_new = params_in_cluster_1.shape[0]
         
-        param_sample = params_in_cluster_1.sample(ss_new)
         centroid_params = centroids[1]
         qc = self._solve_nelson_network(centroid_params, x0, QoI, time)
 
-        # Compute max statistic via max_{j=1,...,ss}(q_c - q_j) / q_c
-        dvec = np.empty(shape=ss_new)
-        for i, row in param_sample.reset_index(drop=True).iterrows():
-            qi = self._solve_nelson_network(row.to_numpy(), x0, QoI, time)
-            dvec[i] = np.abs(qc-qi)
-        error = np.max(dvec) / qc
+        # Compute error by taking largest distances away and averaging errors
+        # can make this block wayyyy faster using either faiss or matrices
+        distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_1.to_numpy(), axis=1)
+        largest_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
+        dvec = np.empty(shape=(ss_new, len(QoI)))
+        for i, row in enumerate(params_in_cluster_1.to_numpy()[largest_indices,:]):
+            qi = self._solve_nelson_network(row, x0, QoI, time)
+            dvec[i,:] = np.abs(qc-qi)
+        error = np.max(dvec / qc)
 
-        if error > error_tol:
+        if (error > error_tol).any():
             # Split cluster in half (recursive step)
             k, right = self._compute_clusters_recursion_helper(
                     params_in_cluster_1, centroid_params, error_tol, QoI, x0, time, indices, ss=ss, k=k)
@@ -200,12 +205,12 @@ class AstrochemClusterModel:
 
     def _flatten_cluster_centers(self, tree):
         centroids = np.zeros(shape=(self.N_clusters, 3))
-        QoI_values = np.zeros(shape=self.N_clusters)
+        QoI_values = np.zeros(shape=(self.N_clusters, self.QoI_length))
         k = 0
         for val in tree:
             if type(val) == Cluster:
                 centroids[k] = val.params
-                QoI_values[k] = val.QoI_value
+                QoI_values[k,:] = val.QoI_value
                 k += 1
             elif type(val) == ClusterTree:
                 k = self._flatten_cluster_centers_recursion(val.left, k, centroids, QoI_values)
@@ -216,7 +221,7 @@ class AstrochemClusterModel:
     def _flatten_cluster_centers_recursion(self, tree, k, centroids, QoI_values):
         if type(tree) == Cluster:
             centroids[k] = tree.params
-            QoI_values[k] = tree.QoI_value
+            QoI_values[k,:] = tree.QoI_value
             k += 1
         elif type(tree) == ClusterTree:
             k = self._flatten_cluster_centers_recursion(tree.left, k, centroids, QoI_values)
@@ -225,12 +230,12 @@ class AstrochemClusterModel:
 
     
     def predict(self, parameters: np.ndarray):
-        predicted_vals = np.zeros(shape=(len(parameters),2))
+        predicted_vals = np.zeros(shape=(len(parameters),1+self.QoI_length))
         params_normalized = (parameters - self.mean.to_numpy()) / self.std.to_numpy()
         _, I = self.faiss_index.search(params_normalized, 1)
         I = np.matrix.flatten(I)
-        predicted_vals[:,1] = I
-        predicted_vals[:,0] = self.QoI_values[I]
+        predicted_vals[:,0] = I
+        predicted_vals[:,1:] = self.QoI_values[I]
         return predicted_vals
     
 

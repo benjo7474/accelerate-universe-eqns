@@ -16,6 +16,10 @@ data[:,[0,1]] = np.log10(data[:,[0,1]])
 params = pd.DataFrame(data=data, columns=['$\log(n_h)$', '$\log(T)$', '$G_0$'])
 
 # Data for ode solves
+# [H_2, H_3^+, e, He, He^+, C, CH_x, O, OH_x, CO, HCO^+, C^+, M^+, M]
+#  0    1      2  3   4     5  6     7  8     9   10     11   12   13
+
+# These are the initial conditions used by Nina in her testing code
 x0 = np.array([
     0.5,
     9.059e-9,
@@ -32,11 +36,16 @@ x0 = np.array([
     2.0e-7,
     2.0e-7
 ])
+# From the overleaf doc
+# x0 = np.array([
+    # what should go here anyways?
+# ])
+
 secs_per_year = 3600*24*365
-tf = 100000 * secs_per_year
+tf = 10000 * secs_per_year
 
 
-def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: int, time: float):
+def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: np.ndarray, time: float):
     n_h = 10**params_row[0]
     T = 10**params_row[1]
     G0 = params_row[2]
@@ -60,7 +69,7 @@ test = small_dataset[~msk]
 
 start_time = time.perf_counter()
 surrogate = AstrochemClusterModel()
-surrogate.train_surrogate_model(train.reset_index(drop=True), 0.05, 9, x0, tf, 10, 10)
+surrogate.train_surrogate_model(train.reset_index(drop=True), 0.1, [2, 0, 1, 9, 5], x0, tf, 10, 10)
 end_time = time.perf_counter()
 
 total_time = end_time - start_time # in seconds
@@ -69,7 +78,7 @@ print(f'Training time: {total_time:.2f} seconds')
 
 # %% If we want to save the surrogate, we need to use pickle 
 import pickle
-with open('data/small_dataset_model.pkl', 'wb') as file:
+with open(f'data/small_model_tf_{tf}.pkl', 'wb') as file:
     pickle.dump(surrogate, file)
 
 # %% Load the tree back in
@@ -80,24 +89,49 @@ with open('data/small_dataset_model.pkl', 'rb') as file:
 
 # %% Test Model
 start_time = time.perf_counter()
-datamat = np.zeros(shape=(len(test),7))
+datamat = np.zeros(shape=(len(test),19))
+# Exact solution for e, H2, H3+, CO, C in columns 0-4
+# Index in column 5
+# Predictions in columns 6-10
+# Errors in columns 11-15
+# Test data in columns 16-18
 for index, row in test.reset_index(drop=True).iterrows():
-    datamat[index, 0] = solve_nelson_network(row.to_numpy(), x0, 9, tf)
+    datamat[index, [0,1,2,3,4]] = solve_nelson_network(row.to_numpy(), x0, [2,0,1,9,5], tf)
 mid_time = time.perf_counter()
-datamat[:,[1,2]] = surrogate.predict(test.to_numpy())
+datamat[:,[5,6,7,8,9,10]] = surrogate.predict(test.to_numpy())
 end_time = time.perf_counter()
 print(f'Time to solve all ODEs: {mid_time-start_time} seconds')
 print(f'Time to predict data: {end_time-mid_time}')
-datamat[:,3] = np.abs(datamat[:,1] - datamat[:,0]) / np.abs(datamat[:,1])
-datamat[:,[4,5,6]] = test.to_numpy()
+datamat[:,[11,12,13,14,15]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]]) / np.abs(datamat[:,[0,1,2,3,4]])
+datamat[:,[16,17,18]] = test.to_numpy()
+
 
 # %% Error statistics
-print(f'Mean: {np.mean(datamat[:,3])}')
-print(f'Median: {np.median(datamat[:,3])}')
-print(f'Max: {np.max(datamat[:,3])}')
-print(f'STD: {np.std(datamat[:,3])}')
-num_vals_outside_error = (datamat[:,3] > 0.05).sum()
+ind = 15
+print(f'Mean: {np.mean(datamat[:,ind])}')
+print(f'Median: {np.median(datamat[:,ind])}')
+print(f'Max: {np.max(datamat[:,ind])}')
+print(f'STD: {np.std(datamat[:,ind])}')
+num_vals_outside_error = (datamat[:,ind] > 0.1).sum()
 print(f'# of points outside error: {num_vals_outside_error} ({num_vals_outside_error/len(datamat[:,2])}% of data)')
+
+# %%
+import matplotlib.pyplot as plt
+plt.figure()
+plt.title('Percent Error: e')
+plt.hist(datamat[:,11], bins=np.arange(0, 0.3, 0.01))
+plt.figure()
+plt.title('Percent Error: H2')
+plt.hist(datamat[:,12], bins=np.arange(0, 0.3, 0.01))
+plt.figure()
+plt.title('Percent Error: H3+')
+plt.hist(datamat[:,13], bins=np.arange(0, 0.3, 0.01))
+plt.figure()
+plt.title('Percent Error: CO')
+plt.hist(datamat[:,14], bins=np.arange(0, 0.3, 0.01))
+plt.figure()
+plt.title('Percent Error: C')
+plt.hist(datamat[:,15], bins=np.arange(0, 0.3, 0.01))
 
 
 # %% debug problem points

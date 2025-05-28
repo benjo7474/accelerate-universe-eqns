@@ -9,7 +9,7 @@ from nelson_langer_network import build_nelson_network
 from matplotlib.backends.backend_pdf import PdfPages
 
 # Load parameters
-datafile = np.load('np-states.npy')
+datafile = np.load('data/tracer_parameter_data.npy')
 datafile[:,0] *= 2
 # ['nH', 'T', 'XH2', 'FUV', 'NH', 'zeta'] are the columns of datafile
 data = datafile[:,[0, 1, 3]]
@@ -41,24 +41,44 @@ cluster_centers = cluster_centers_normalized * std + mean
 
 
 # %% Solve ODE at each cluster centroid and save results in PDF
+# ICs from Nina's code (Despodic)
+# x0 = np.array([
+#     0.5,      # H_2
+#     9.059e-9, # H_3^+
+#     2e-4,     # e
+#     0.1,      # He
+#     7.866e-7, # He^+
+#     0.0,      # C
+#     0.0,      # CH_x
+#     0.0004,   # O
+#     0.0,      # OH_x
+#     0.0,      # CO
+#     0.0,      # HCO^+
+#     0.0002,   # C^+
+#     2.0e-7,   # M^+
+#     2.0e-7    # M
+# ])
+
+# ICs that I partly took from overleaf, partly made up
 x0 = np.array([
-    0.5,
-    9.059e-9,
-    2e-4,
-    0.1,
-    7.866e-7,
-    0.0,
-    0.0,
-    0.0004,
-    0.0,
-    0.0,
-    0.0,
-    0.0002,
-    2.0e-7,
-    2.0e-7
+    0.5,      # H_2
+    0.25,     # H_3^+
+    5.324e-6, # e
+    0.1,      # He
+    7.866e-7, # He^+
+    1.77e-4,  # C
+    0.0,      # CH_x
+    0.0004,   # O
+    0.0,      # OH_x
+    0.0,      # CO
+    0.0,      # HCO^+
+    1e-10,    # C^+
+    2.0e-7,   # M^+
+    2.0e-7    # M
 ])
+
 secs_per_year = 3600*24*365
-tf = 100000 * secs_per_year
+tf = 10 * secs_per_year
 
 species = [
     '$H_2$',   #0
@@ -78,7 +98,7 @@ species = [
 ]
 
 # %%
-with PdfPages('centroid_plots.pdf') as pdf:
+with PdfPages('testing.pdf') as pdf:
     for index, row in cluster_centers.iterrows():
         n_h = 10**row.iloc[0]
         T = 10**row.iloc[1]

@@ -49,8 +49,7 @@ class ReactionNetwork:
         Q, L = self.build_tensors()
         self.Q = Q
         self.L = L
-        self.Q_dense = Q.to_dense() # why does this not always work?!?!?!?!
-        # updated pytorch -- that might have fixed the issue
+        self.Q_dense = Q.to_dense()
 
     def num_nonzero_entries(self):
         N_L = 0
