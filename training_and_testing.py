@@ -55,7 +55,7 @@ def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: np.ndarray
 
 
 
-# %% Load data
+# %% Load small dataset
 
 foo = np.load('data/small_dataset.npy')
 small_dataset = pd.DataFrame(data=foo, columns=['$\log(n_h)$', '$\log(T)$', '$G_0$'])
@@ -65,11 +65,39 @@ msk = np.random.rand(len(small_dataset)) > 0.2
 train = small_dataset[msk]
 test = small_dataset[~msk]
 
+
+# %% Load medium dataset (with ode solves)
+foo = np.load('data/medium_dataset_with_ode_solves.npy')
+medium_dataset = pd.DataFrame(data=foo, columns=[
+    '$\log(n_h)$',
+    '$\log(T)$',
+    '$G_0$',
+    'e (t=100Y)',
+    'H_2 (t=100Y)',
+    'H_3+ (t=100Y)',
+    'CO (t=100Y)',
+    'C (t=100Y)',
+    'e (t=1000Y)',
+    'H_2 (t=1000Y)',
+    'H_3+ (t=1000Y)',
+    'CO (t=1000Y)',
+    'C (t=1000Y)',
+    'e (t=10000Y)',
+    'H_2 (t=10000Y)',
+    'H_3+ (t=10000Y)',
+    'CO (t=10000Y)',
+    'C (t=10000Y)',
+])
+np.random.seed(1234)
+msk = np.random.rand(len(medium_dataset)) > 0.2
+train = medium_dataset[msk]
+test = medium_dataset[~msk]
+
 # %% Train model
 
 start_time = time.perf_counter()
 surrogate = AstrochemClusterModel()
-surrogate.train_surrogate_model(train.reset_index(drop=True), 0.1, [2, 0, 1, 9, 5], x0, tf, 10, 10)
+surrogate.train_surrogate_model(train.reset_index(drop=True), 0.1, [2, 0, 1, 9, 5], x0, tf, 10, 10, True, [13,14,15,16,17])
 end_time = time.perf_counter()
 
 total_time = end_time - start_time # in seconds
@@ -95,19 +123,22 @@ datamat = np.zeros(shape=(len(test),19))
 # Predictions in columns 6-10
 # Errors in columns 11-15
 # Test data in columns 16-18
-for index, row in test.reset_index(drop=True).iterrows():
-    datamat[index, [0,1,2,3,4]] = solve_nelson_network(row.to_numpy(), x0, [2,0,1,9,5], tf)
+j = 0
+for index, row in test.iterrows():
+    datamat[j, [0,1,2,3,4]] = medium_dataset.iloc[index, [13,14,15,16,17]].to_numpy()
+    j += 1
+    # datamat[index, [0,1,2,3,4]] = solve_nelson_network(row.to_numpy(), x0, [2,0,1,9,5], tf)
 mid_time = time.perf_counter()
-datamat[:,[5,6,7,8,9,10]] = surrogate.predict(test.to_numpy())
+datamat[:,[5,6,7,8,9,10]] = surrogate.predict(test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy())
 end_time = time.perf_counter()
 print(f'Time to solve all ODEs: {mid_time-start_time} seconds')
 print(f'Time to predict data: {end_time-mid_time}')
 datamat[:,[11,12,13,14,15]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]]) / np.abs(datamat[:,[0,1,2,3,4]])
-datamat[:,[16,17,18]] = test.to_numpy()
+datamat[:,[16,17,18]] = test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy()
 
 
 # %% Error statistics
-ind = 15
+ind = 14
 print(f'Mean: {np.mean(datamat[:,ind])}')
 print(f'Median: {np.median(datamat[:,ind])}')
 print(f'Max: {np.max(datamat[:,ind])}')
