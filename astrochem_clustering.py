@@ -1,6 +1,13 @@
+# Represents a cluster model for astro parameters.
+# The class AstrochemClusterModel, after calling the function train_surrogate_model(),
+# contains cluster centroids and QoI evaluations at those centroids that we can use
+# k-nearest neighbors to obtain a good approximation.
+
+
 import numpy as np
 import pandas as pd
 import sklearn.cluster
+import torch
 from nelson_langer_network import build_nelson_network
 import faiss
 
@@ -213,7 +220,8 @@ class AstrochemClusterModel:
         n_h = 10**(self.std.iloc[0] * params_row[0] + self.mean.iloc[0])
         T = 10**(self.std.iloc[1] * params_row[1] + self.mean.iloc[1])
         G0 = self.std.iloc[2] * params_row[2] + self.mean.iloc[2]
-        network = build_nelson_network(n_h = n_h, T = T, G0 = G0)
+        p = torch.tensor([n_h, T, G0])
+        network = build_nelson_network(params=p, compute_sensitivities=False)
         _, yvec = network.solve_reaction([0, time], x0)
         return yvec[QoI, -1]
     

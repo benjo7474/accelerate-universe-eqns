@@ -188,36 +188,38 @@ def build_tensors():
 
 
 def build_nelson_network(
+        params=np.array([611, 10, 1.7]),
         Av: float = 2,
-        G0: float = 1.7,
         shield: float = 1,
-        n_h: float = 611,
-        T: float = 10
+        compute_sensitivities=False
     ):
 
-    return ReactionNetwork(14, n_h,
-        Reaction([0], [1,2], 1.2e-17),
-        Reaction([3], [4,2], 6.8e-18),
-        Reaction([1,5], [6,0], 2e-9),
-        Reaction([1,7], [8,0], 8e-10),
-        Reaction([1,9], [10,0], 1.7e-9),
-        Reaction([1,0], [3], 7e-15),
-        Reaction([4,9], [11,7,3], 1.6e-9),
-        Reaction([11,0], [6], 4e-16),
-        Reaction([11,8], [10], 1e-9),
-        Reaction([7,6], [9], 2e-10),
-        Reaction([5,8], [9], 5.8e-12*T**0.5),
-        Reaction([4,2], [3], 9e-11/T**0.64),
-        Reaction([1,2], [0], 1.9e-6/T**0.54),
-        Reaction([11,2], [5], 1.4e-10/T**0.61),
-        Reaction([10,2], [9], 3.3e-5/T),
-        Reaction([12,2], [13], 3.8e-10/T**0.65),
-        Reaction([1,13], [12,2,0], 2e-9),
-        Reaction([5], [11,2], 3e-10*G0*np.exp(-3*Av)),
-        Reaction([6], [5], 1e-9*G0*np.exp(-1.5*Av)),
-        Reaction([9], [5,7], 1e-10*shield*G0*np.exp(-3*Av)),
-        Reaction([8], [7], 5e-10*G0*np.exp(-1.7*Av)),
-        Reaction([13], [12,2], 2e-10*G0*np.exp(-1.9*Av)),
-        Reaction([10], [9], 1.5e-10*G0*np.exp(-2.5*Av))
+    return ReactionNetwork(14, params,
+        Reaction([0], [1,2], lambda p: 1.2e-17),
+        Reaction([3], [4,2], lambda p: 6.8e-18),
+        Reaction([1,5], [6,0], lambda p: 2e-9),
+        Reaction([1,7], [8,0], lambda p: 8e-10),
+        Reaction([1,9], [10,0], lambda p: 1.7e-9),
+        Reaction([1,0], [3], lambda p: 7e-15),
+        Reaction([4,9], [11,7,3], lambda p: 1.6e-9),
+        Reaction([11,0], [6], lambda p: 4e-16),
+        Reaction([11,8], [10], lambda p: 1e-9),
+        Reaction([7,6], [9], lambda p: 2e-10),
+        Reaction([5,8], [9], lambda p: 5.8e-12*p[1]**0.5),
+        Reaction([4,2], [3], lambda p: 9e-11/p[1]**0.64),
+        Reaction([1,2], [0], lambda p: 1.9e-6/p[1]**0.54),
+        Reaction([11,2], [5], lambda p: 1.4e-10/p[1]**0.61),
+        Reaction([10,2], [9], lambda p: 3.3e-5/p[1]),
+        Reaction([12,2], [13], lambda p: 3.8e-10/p[1]**0.65),
+        Reaction([1,13], [12,2,0], lambda p: 2e-9),
+        Reaction([5], [11,2], lambda p: 3e-10*p[2]*np.exp(-3*Av)),
+        Reaction([6], [5], lambda p: 1e-9*p[2]*np.exp(-1.5*Av)),
+        Reaction([9], [5,7], lambda p: 1e-10*shield*p[2]*np.exp(-3*Av)),
+        Reaction([8], [7], lambda p: 5e-10*p[2]*np.exp(-1.7*Av)),
+        Reaction([13], [12,2], lambda p: 2e-10*p[2]*np.exp(-1.9*Av)),
+        Reaction([10], [9], lambda p: 1.5e-10*p[2]*np.exp(-2.5*Av)),
+        compute_sensitivities=compute_sensitivities
     )
+
+
 
