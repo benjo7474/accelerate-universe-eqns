@@ -1,8 +1,6 @@
 
 import numpy as np
 import sklearn.cluster
-import pandas as pd
-import faiss
 from collections.abc import Callable
 
 
@@ -82,7 +80,7 @@ def recursive_cluster_algorithm(
 
         if error > error_tol:
             # Split cluster in half (recursive step)
-            k, cluster_structure[j] = _recursive_clustering_helper(
+            k, cluster_structure[j] = _recursive_cluster_algorithm_helper(
                     params_in_cluster, centroid_params, error_tol, eval_function,
                     ss, ode_solves[labels==j], k, mean, std)
         else:
@@ -94,7 +92,8 @@ def recursive_cluster_algorithm(
     return k, cluster_structure
 
 
-def _recursive_clustering_helper(
+
+def _recursive_cluster_algorithm_helper(
     params: np.ndarray,
     prev_centroid: np.ndarray,
     error_tol: float,
@@ -137,7 +136,7 @@ def _recursive_clustering_helper(
 
     if error > error_tol:
         # Split cluster in half (recursive step)
-        k, left = _recursive_clustering_helper(
+        k, left = _recursive_cluster_algorithm_helper(
                 params_in_cluster_0, centroid_params, error_tol, eval_function,
                 ss, ode_solves[labels==0], k, mean, std)
     else:
@@ -171,7 +170,7 @@ def _recursive_clustering_helper(
 
     if (error > error_tol).any():
         # Split cluster in half (recursive step)
-        k, right = _recursive_clustering_helper(
+        k, right = _recursive_cluster_algorithm_helper(
                 params_in_cluster_1, centroid_params, error_tol, eval_function,
                 ss, ode_solves[labels==1], k, mean, std)
     else:
@@ -181,3 +180,30 @@ def _recursive_clustering_helper(
 
     return k, ClusterTree(prev_centroid, left, right)
 
+
+
+def flatten_cluster_centers(nc, nq, tree):
+    centroids = np.zeros(shape=(nc, 3))
+    QoI_values = np.zeros(shape=(nc, nq))
+    k = 0
+    for val in tree:
+        if type(val) == Cluster:
+            centroids[k] = val.params
+            QoI_values[k,:] = val.QoI_value
+            k += 1
+        elif type(val) == ClusterTree:
+            k = _flatten_cluster_centers_helper(val.left, k, centroids, QoI_values)
+            k = _flatten_cluster_centers_helper(val.right, k, centroids, QoI_values)
+    return centroids, QoI_values
+
+
+
+def _flatten_cluster_centers_helper(tree, k, centroids, QoI_values):
+    if type(tree) == Cluster:
+        centroids[k] = tree.params
+        QoI_values[k,:] = tree.QoI_value
+        k += 1
+    elif type(tree) == ClusterTree:
+        k = _flatten_cluster_centers_helper(tree.left, k, centroids, QoI_values)
+        k = _flatten_cluster_centers_helper(tree.right, k, centroids, QoI_values)
+    return k
