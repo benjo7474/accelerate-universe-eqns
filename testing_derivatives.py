@@ -21,7 +21,6 @@ def check_dQdp():
     p = torch.tensor(data=[10000, 80, 0.5])
     NL = build_nelson_network(params=p, compute_sensitivities=True)
     dQ_dp = NL.dQ_dp
-    dL_dp = NL.dL_dp
     eye = torch.eye(3)
     hvec = 10.0**torch.arange(start=1,end=1,step=-1)
     errvec = torch.zeros(len(hvec))
@@ -123,7 +122,7 @@ def generate_slice_plots(p, tf_years):
 
 def p_to_dqdp_map_FD(p: np.ndarray, tf):
 
-    pert = 1e-3 * p
+    pert = 1e-2 * p
     nh_pert = pert[0]
     T_pert = pert[1]
     G0_pert = pert[2]
@@ -136,7 +135,7 @@ def p_to_dqdp_map_FD(p: np.ndarray, tf):
     return dq_dp_fd
 
 
-def compute_error_from_FD(p, print_vecs=False, tf_years=10000):
+def compute_error_from_FD(p, tf_years, print_vecs=False):
     # these parameters work pretty damn well
     # p = torch.tensor([10**0.062272, 10**4.017193, 0.741617])
     tf = 3600 * 24 * 365 * tf_years
@@ -150,7 +149,7 @@ def compute_error_from_FD(p, print_vecs=False, tf_years=10000):
 
 def get_sample_of_parameters(N):
     # reads parameters, samples and converts to non-log format
-    # returns in torch format
+    # returns in numpy format
     params = load_parameters()
     sampled_params = params.sample(N)
     sampled_params_numpy = sampled_params.to_numpy()
@@ -161,11 +160,11 @@ def get_sample_of_parameters(N):
 
 # %% Now include random sampling
 # take 100 random parameters, run error for each and plot
-def measure_FD_error_over_sample(N):
+def measure_FD_error_over_sample(N, tf_years):
     sample = get_sample_of_parameters(N)
     FD_errorvec = np.zeros(N)
     for j, param_row in enumerate(sample):
-        FD_errorvec[j] = compute_error_from_FD(param_row, print_vecs=False)
+        FD_errorvec[j] = compute_error_from_FD(param_row, tf_years, print_vecs=False)
 
     plt.plot(FD_errorvec)
     return sample, FD_errorvec

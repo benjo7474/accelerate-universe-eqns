@@ -55,7 +55,12 @@ secs_per_year = 3600*24*365
 years = 10000
 tf = years * secs_per_year
 
+QoI_indices = [2, 0, 1, 9, 5]
+ode_solve_columns = [8, 9, 10, 11, 12]
 
+
+# this takes in LOG parameters and returns the quantity of interest.
+# In other words, it is the p to q map, but we are allowed to specify which quantity, ICs and time.
 def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: np.ndarray, time: float, teval=None):
     n_h = 10**params_row[0]
     T = 10**params_row[1]
@@ -70,8 +75,10 @@ def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: np.ndarray
 
 
 
-# %% Load small dataset
+# ---- FUNCTIONS TO LOAD DATA ---- #
 
+
+# Load small dataset
 def load_small_dataset():
     foo = np.load('data/small_dataset.npy')
     small_dataset = pd.DataFrame(data=foo, columns=['$\log(n_h)$', '$\log(T)$', '$G_0$'])
@@ -82,9 +89,8 @@ def load_small_dataset():
     return train, test
 
 
-# %% Load medium dataset (with ode solves)
+# Load medium dataset (with ode solves)
 # return training and testing data pandas dfs (should put seed as a parameter)
-
 def load_medium_dataset_with_ode_solves():
     foo = np.load('data/medium_dataset_with_ode_solves.npy')
     medium_dataset = pd.DataFrame(data=foo, columns=[
@@ -120,8 +126,7 @@ def load_medium_dataset_with_ode_solves():
 
 
 
-# %% Load large dataset (with ode solves)
-
+# Load large dataset (with ode solves)
 def load_large_dataset_with_ode_solves():
     foo = np.load('data/large_dataset_with_ode_solves.npy')
     large_dataset = pd.DataFrame(data=foo, columns=[
@@ -154,8 +159,7 @@ def load_large_dataset_with_ode_solves():
     return train, test
 
 
-# %% Load FULL dataset (with ODE solves!)
-
+# Load FULL dataset (with ODE solves!)
 def load_full_dataset_with_ode_solves():
     foo = np.load('data/tracer_parameter_data_with_ode_solves.npy')
     full_dataset = pd.DataFrame(data=foo, columns=[
@@ -191,15 +195,15 @@ def load_full_dataset_with_ode_solves():
 
 
 
-# %% Better sampling algorithm (as suggested by George)
+# Better sampling algorithm (as suggested by George)
 # Run FAISS for the entire 2M dataset
-
+# INCOMPLETE;
 def better_sampling_algorithm():
     params = load_parameters()
     import faiss
     faiss_index_params = faiss.IndexFlatL2(3)
     faiss_index_params.add(params.to_numpy())
-    D, I = faiss_index_params.search(params.to_numpy(), 20) # this takes a long time
+    D, I = faiss_index_params.search(params.to_numpy(), 20) # this takes a longggg time
     # I is saved in data/tracer_param_data_nearest_ind.npy
 
     from numba import jit
@@ -214,28 +218,35 @@ def better_sampling_algorithm():
 
 
 
-# %% Train model
+
+# ---- FUNCTIONS TO GENERATE DATA FILES ---- #
+
+
+
+
+# ---- FUNCTIONS TO BUILD CLUSTER MODELS ---- #
+
 
 def train_model(train_data):
     start_time = time.perf_counter()
     surrogate = AstrochemClusterModel()
-    surrogate.train_surrogate_model(train_data.reset_index(drop=True), 0.01, [2, 0, 1, 9, 5], x0, tf, 10, 10, False, [8,9,10,11,12])
+    surrogate.train_surrogate_model(train_data.reset_index(drop=True), 0.01, QoI_indices, x0, tf, 10, 10, ode_solve_columns)
     end_time = time.perf_counter()
 
     total_time = end_time - start_time # in seconds
     print(f'Training time: {total_time:.2f} seconds')
+    return surrogate
 
 
-# %% Bonus test case where we use the MAX number of clusters;
-#    i.e. each training data point as a cluster centroid (target point)
-def train_model_max_and_get_datamatrix(train, test):
-    import faiss
-    centroids = train.to_numpy()[:,[0,1,2]]
-    QoI_values_ind = [13,14,15,16,17]
-    QoI_values = train.to_numpy()[:,QoI_values_ind]
-    faiss_index = faiss.IndexFlatL2(3)
-    faiss_index.add(centroids)
+# Bonus test case where we use the MAX number of source points;
+# i.e. each training data point as a cluster centroid.
+def train_model_max(train_data):
+    surrogate = AstrochemClusterModel()
+    surrogate.train_surrogate_model_max_targets(train_data.reset_index(drop=True), [2,0,1,9,5], x0, tf, ode_solve_columns)
+    return surrogate
 
+
+def test_from_faiss_object(faiss_index, QoI_values, QoI_values_ind, test):
     start_time = time.perf_counter()
     D, I = faiss_index.search(test.to_numpy()[:,[0,1,2]], 1)
     end_time = time.perf_counter()
@@ -253,15 +264,16 @@ def train_model_max_and_get_datamatrix(train, test):
     # test data
     datamat[:,[21,22,23]] = test.to_numpy()[:,[0,1,2]]
 
-    return datamat
+    return faiss_index, datamat
 
-# %% If we want to save the surrogate, we need to use pickle 
+
+# If we want to save the surrogate, we need to use pickle 
 def save_surrogate(surrogate):
     import pickle
     with open(f'data/medium_model_tf_{tf}_tol_1.0.pkl', 'wb') as file:
         pickle.dump(surrogate, file)
 
-# %% Load the tree back in with pickle
+# Load the tree back in with pickle
 def load_surrogate(filename):
     import pickle
     with open(filename, 'rb') as file:
@@ -269,8 +281,33 @@ def load_surrogate(filename):
         return surrogate
 
 
-# %% Test Model
-def get_datamatrix(dataset, surrogate, test):
+# Test Model
+def test_from_surrogate_object_no_ode_solves(surrogate, test):
+
+    datamat = np.zeros(shape=(len(test),24))
+    # Exact solution for e, H2, H3+, CO, C in columns 0-4
+    # Index in column 5
+    # Predictions in columns 6-10
+    # Relative errors in columns 11-15
+    # Absolute errors in columns 16-20
+    # Test data in columns 21-23
+
+    # exact solution
+    datamat[:,[0,1,2,3,4]] = test.to_numpy()[:, [8,9,10,11,12]]
+    # index and predictions
+    datamat[:,[5,6,7,8,9,10]] = surrogate.predict(test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy())
+    # percent errors
+    datamat[:,[11,12,13,14,15]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]]) / np.abs(datamat[:,[0,1,2,3,4]])
+    # relative errors
+    datamat[:,[16,17,18,19,20]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]])
+    # test data
+    datamat[:,[21,22,23]] = test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy()
+
+    return datamatrix_to_pandas(datamat)
+
+
+def test_from_surrogate_object_ode_solves(surrogate, test):
+
     start_time = time.perf_counter()
     datamat = np.zeros(shape=(len(test),24))
     # Exact solution for e, H2, H3+, CO, C in columns 0-4
@@ -279,20 +316,24 @@ def get_datamatrix(dataset, surrogate, test):
     # Relative errors in columns 11-15
     # Absolute errors in columns 16-20
     # Test data in columns 21-23
-    j = 0
-    for index, row in test.iterrows():
-        datamat[j, [0,1,2,3,4]] = dataset.iloc[index, [8,9,10,11,12]].to_numpy()
-        # datamat[j, [0,1,2,3,4]] = solve_nelson_network(row.to_numpy()[0:3], x0, [2,0,1,9,5], tf)
-        j += 1
+
+    # exact solutions
+    for j, row in enumerate(test.to_numpy()):
+        datamat[j, [0,1,2,3,4]] = solve_nelson_network(row[0:3], x0, QoI_indices, tf)
     mid_time = time.perf_counter()
+    # predictions
     datamat[:,[5,6,7,8,9,10]] = surrogate.predict(test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy())
     end_time = time.perf_counter()
     print(f'Time to solve all ODEs: {mid_time-start_time} seconds')
     print(f'Time to predict data: {end_time-mid_time}')
+    # relative errors
     datamat[:,[11,12,13,14,15]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]]) / np.abs(datamat[:,[0,1,2,3,4]])
+    # absolute errors
     datamat[:,[16,17,18,19,20]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]])
+    # test data
     datamat[:,[21,22,23]] = test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy()
 
+    return datamatrix_to_pandas(datamat)
 
 
 def datamatrix_to_pandas(datamat):
@@ -325,22 +366,25 @@ def datamatrix_to_pandas(datamat):
     return pandas_datamat
 
 
+if __name__ == '__main__':
+    train, test = load_medium_dataset_with_ode_solves()
+    surrogate = train_model_max(train)
+    data = test_from_surrogate_object_no_ode_solves(surrogate, test)
+    print(data)
 
 
 
 
-
+# %%
 ######## ------ PLOTS AND ERROR ANALYSIS ------ ########
 
 
 
-
-# %% Error statistics
-
-def print_error_statistics(datamat):
+# Error statistics
+def print_error_statistics(datamat: pd.DataFrame):
     ind = 11
-    print('Stats for e (10K years)')
-    print(f'Mean: {np.mean(datamat[:,ind])}')
+    print('Percent error for e')
+    print(f'Mean: {np.mean(datamat['Percent Error e'])}')
     print(f'Median: {np.median(datamat[:,ind])}')
     print(f'Max: {np.max(datamat[:,ind])}')
     print(f'STD: {np.std(datamat[:,ind])}')
@@ -349,7 +393,7 @@ def print_error_statistics(datamat):
     print(f'# of points outside {tol*100}% error: {num_vals_outside_error} ({num_vals_outside_error/len(datamat[:,2])}% of data)\n')
 
     ind = 12
-    print('Stats for H2 (1K years)')
+    print('Stats for H2')
     print(f'Mean: {np.mean(datamat[:,ind])}')
     print(f'Median: {np.median(datamat[:,ind])}')
     print(f'Max: {np.max(datamat[:,ind])}')

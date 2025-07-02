@@ -239,5 +239,26 @@ class ReactionNetwork:
                 t_eval=t_eval)
         return soln.t, soln.y
 
+    def solve_reaction_snapshot(self, x0, tf, QoI):
+        if self.compute_sensitivities == False:
+            soln = solve_ivp(self.reaction_rhs, [0, tf], x0, method='LSODA',
+                rtol=1e-10,
+                jac=self.jacobian,
+                max_step=tf/1e3,
+                first_step=tf/1e12,
+                t_eval=[tf])
+        elif self.compute_sensitivities == True:
+            # pad the initial condition with zeros
+            zeros = np.zeros(self.num_species)
+            x0_padded = x0
+            for i in range(len(self.params)):
+                x0_padded = np.concatenate([x0_padded, zeros])
+            soln = solve_ivp(self.sensitivities_rhs, tf, x0_padded, method='LSODA',
+                rtol=1e-10,
+                jac=self.jacobian_sensitivities,
+                max_step=tf/1e3,
+                first_step=tf/1e12,
+                t_eval=[tf])
+        return soln.y.flatten()[QoI]
 
         
