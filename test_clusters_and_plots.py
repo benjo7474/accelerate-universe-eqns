@@ -11,6 +11,7 @@ import time
 import torch
 from astrochem_clustering import AstrochemClusterModel
 import matplotlib.pyplot as plt
+from taylor_grad_boost_KNN import GradientBoostModel
 
 # Load parameters
 
@@ -55,7 +56,7 @@ secs_per_year = 3600*24*365
 years = 10000
 tf = years * secs_per_year
 
-QoI_indices = [2, 0, 1, 9, 5]
+QoI_indices = 9
 ode_solve_columns = [8, 9, 10, 11, 12]
 
 
@@ -227,10 +228,36 @@ def better_sampling_algorithm():
 # ---- FUNCTIONS TO BUILD CLUSTER MODELS ---- #
 
 
+def test_taylor_grad_boost_KNN_class():
+
+    input_data = np.load('input_parameters.npy')
+    output_data = np.load('output_data_xCO_with_sens.npy')
+    model = GradientBoostModel(input_data[:800,:], output_data[:800,0,0], output_data[:800,1:4,0])
+
+    model.test_accuracy(input_data[800:,:], output_data[800:,0,0])
+
+
+
 def train_model(train_data):
+    sample = train_data.sample(1000).to_numpy()
+    params = sample[:,0:3]
+    solves = sample[:,16]
+
+    # some testing
+    # j = 1056
+    # p = params[j]
+    # p[0] = 10 ** p[0]
+    # p[1] = 10 ** p[1]
+    # q1 = solves[j]
+    # NL = build_nelson_network(params=p, compute_sensitivities=False)
+    # q2 = NL.solve_reaction_snapshot(x0, tf, 9)
+    # print(q1)
+    # print(q2)
+
     start_time = time.perf_counter()
     surrogate = AstrochemClusterModel()
-    surrogate.train_surrogate_model(train_data.reset_index(drop=True), 0.01, QoI_indices, x0, tf, 10, 10, ode_solve_columns)
+    surrogate.train_model(params, QoI_indices, x0, tf, 10, 10, 
+                          do_clustering=False, use_gradient_boost=False, ode_solves = solves)
     end_time = time.perf_counter()
 
     total_time = end_time - start_time # in seconds
@@ -268,9 +295,9 @@ def test_from_faiss_object(faiss_index, QoI_values, QoI_values_ind, test):
 
 
 # If we want to save the surrogate, we need to use pickle 
-def save_surrogate(surrogate):
+def save_surrogate(surrogate, filename):
     import pickle
-    with open(f'data/medium_model_tf_{tf}_tol_1.0.pkl', 'wb') as file:
+    with open(filename, 'wb') as file:
         pickle.dump(surrogate, file)
 
 # Load the tree back in with pickle
@@ -366,11 +393,21 @@ def datamatrix_to_pandas(datamat):
     return pandas_datamat
 
 
-if __name__ == '__main__':
-    train, test = load_medium_dataset_with_ode_solves()
-    surrogate = train_model_max(train)
-    data = test_from_surrogate_object_no_ode_solves(surrogate, test)
-    print(data)
+# if __name__ == '__main__':
+#     train, test = load_medium_dataset_with_ode_solves()
+#     surrogate = train_model_max(train)
+#     data = test_from_surrogate_object_no_ode_solves(surrogate, test)
+#     print(data)
+
+
+# %%
+train, test = load_full_dataset_with_ode_solves()
+test = test.sample(100)
+# %%
+surrogate = train_model(train)
+# save_surrogate(surrogate, 'surrogate.pkl')
+# %%
+surrogate.KNN_model.test_accuracy(test.to_numpy()[:,0:3], test.to_numpy()[:,16], 1)
 
 
 
@@ -384,7 +421,7 @@ if __name__ == '__main__':
 def print_error_statistics(datamat: pd.DataFrame):
     ind = 11
     print('Percent error for e')
-    print(f'Mean: {np.mean(datamat['Percent Error e'])}')
+    # print(f'Mean: {np.mean(datamat['Percent Error e'])}')
     print(f'Median: {np.median(datamat[:,ind])}')
     print(f'Max: {np.max(datamat[:,ind])}')
     print(f'STD: {np.std(datamat[:,ind])}')
@@ -603,4 +640,3 @@ def cluster_visualization(params, surrogate):
     plt.ylabel('$\log(T)$')
     plt.show()
 
-# %%

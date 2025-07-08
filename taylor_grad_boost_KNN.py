@@ -1,11 +1,10 @@
+from types import NoneType
 import numpy as np
 import faiss
 import matplotlib.pyplot as plt
 
-# TODO add option to specify k for k-nearest neighbors, then take average of the predictions.
-
 # TODO eventually make labels multi-d. This would make labels a matrix and gradients a rank-3 tensor.
-# for this endeavor is it better to use one pandas dataframe and specify the columns to use?
+
 
 # Contains machinery that takes in features
 # Does nearest neighbors searches via FAISS
@@ -15,19 +14,21 @@ class GradientBoostModel:
     # CONSTRUCTOR
     def __init__(self, features: np.ndarray, labels: np.ndarray, gradients: np.ndarray = None):
         
-        # INPUT ERROR CHECKING
-        # cannot have any of the features be undefined
-        # maybe don't worry about this for now...
+        # --- INPUT ERROR CHECKING ---
 
         # check that length of vectors is correct
         self._mf, self._nf = features.shape
-        self._ml, self._nl = labels.shape
-        self._mg, self._ng = gradients.shape
+        self._ml           = len(labels)
 
-        if self._mf != self._ml or self._mf != self._mg:
-            raise ValueError('ERROR: one of features, labels or gradients has a mismatching size of points')
-        if self._nf != self._ng:
-            raise ValueError('ERROR: number of features does not match length of each gradient vector')
+        if type(gradients) != NoneType:
+            self._mg, self._ng = gradients.shape
+            if self._nf != self._ng:
+                raise ValueError('Number of features does not match length of each gradient vector')
+            if self._mf != self._mg:
+                raise ValueError('Features and gradients has a mismatching size of points')
+        if self._mf != self._ml:
+            raise ValueError('Features and labels has a mismatching size of points')
+        
 
         # save data
         self.features = features
@@ -41,35 +42,40 @@ class GradientBoostModel:
 
     # given a matrix of features, uses FAISS to return the predicted value.
     # uses the average of the k-nearest neighbors (default only uses 1 nearest neighbor)
-    def predict(self, targets: np.ndarray):
+    def predict(self, targets: np.ndarray, k: int):
 
         # TODO check if the length of each feature vector matches the length of training vectors
 
         # use FAISS to do k-nearest neighbors search
-        D, I = self._faiss_index.search(targets, 1)
+        _, I = self._faiss_index.search(targets, k)
         # compute distances from source to target features
-        distance_vecs = targets - self.features[I]
         
         # gradient not specified; use only nearest neighbor
-        if self.gradients == None:
-            predictions = self.labels[I]
-        else:
-        # gradient specified; use formula q(x) ~= q(x_0) + grad(q(x_0)) * (x-x_0)
-            predictions = self.labels[I] + np.sum(self.gradients[I] * distance_vecs, axis=1)
+        # if self.gradients == None:
+        #     
+        predictions = np.zeros(len(targets))
+        for j in range(k):
+            distance_vecs = targets - self.features[I[:,j]]
+            if type(self.gradients) == NoneType:
+                predictions += self.labels[I[:,j]]
+            else:
+                predictions += self.labels[I[:,j]] + np.sum(self.gradients[I[:,j]] * distance_vecs, axis=1)
 
-        return predictions
+        # return average
+        return predictions / k
     
 
     # given a matrix of features and a list of true values, use above function to predict,
     # followed by comparing the accuracy to true_values and displaying error statistics.
-    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray):
+    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray, k: int):
 
         # TODO check if length of targets and true_values matches
         # TODO check if length of each feature vector matches length of training vectors
+        ntv = len(true_values)
 
-        predicted_values = self.predict(targets, 1)
+        predicted_values = self.predict(targets, k)
         absolute_error = np.abs(predicted_values - true_values)
-        percent_error = self.absolute_error / np.abs(true_values)
+        percent_error = absolute_error / np.abs(true_values)
 
         print('PERCENT ERRORS')
         print(f'Mean: {np.mean(percent_error)}')

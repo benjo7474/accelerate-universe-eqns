@@ -221,5 +221,3 @@ def build_nelson_network(
         compute_sensitivities=compute_sensitivities
     )
 
-
-
