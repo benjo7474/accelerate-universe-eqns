@@ -1,3 +1,4 @@
+import time
 from types import NoneType
 import numpy as np
 import faiss
@@ -42,61 +43,36 @@ class GradientBoostModel:
 
     # given a matrix of features, uses FAISS to return the predicted value.
     # uses the average of the k-nearest neighbors (default only uses 1 nearest neighbor)
-    def predict(self, targets: np.ndarray, k: int):
+    def predict(self, targets: np.ndarray, k: int, unwrap_log=[False,False,False], disp_time=False):
 
+        start_time = time.perf_counter()
         # TODO check if the length of each feature vector matches the length of training vectors
 
         # use FAISS to do k-nearest neighbors search
         _, I = self._faiss_index.search(targets, k)
         # compute distances from source to target features
         
-        # gradient not specified; use only nearest neighbor
-        # if self.gradients == None:
-        #     
+        # if necessary we deal with distances by unwrapping log
+        features_unlog = self.features.copy()
+        targets_unlog = targets.copy()
+        for j, val in enumerate(unwrap_log):
+            if val == True:
+                targets_unlog[:,j] = 10 ** targets_unlog[:,j]
+                features_unlog[:,j] = 10 ** features_unlog[:,j]
+        
         predictions = np.zeros(len(targets))
         for j in range(k):
-            distance_vecs = targets - self.features[I[:,j]]
             if type(self.gradients) == NoneType:
+                # gradient not specified; use only nearest neighbor
                 predictions += self.labels[I[:,j]]
             else:
+                distance_vecs = targets_unlog - features_unlog[I[:,j]]
                 predictions += self.labels[I[:,j]] + np.sum(self.gradients[I[:,j]] * distance_vecs, axis=1)
+
+        if disp_time == True:
+            end_time = time.perf_counter()
+            print(f'Time elapsed for predictions: {end_time-start_time} seconds')
 
         # return average
         return predictions / k
     
-
-    # given a matrix of features and a list of true values, use above function to predict,
-    # followed by comparing the accuracy to true_values and displaying error statistics.
-    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray, k: int):
-
-        # TODO check if length of targets and true_values matches
-        # TODO check if length of each feature vector matches length of training vectors
-        ntv = len(true_values)
-
-        predicted_values = self.predict(targets, k)
-        absolute_error = np.abs(predicted_values - true_values)
-        percent_error = absolute_error / np.abs(true_values)
-
-        print('PERCENT ERRORS')
-        print(f'Mean: {np.mean(percent_error)}')
-        print(f'Median: {np.median(percent_error)}')
-        print(f'Max: {np.max(percent_error)}')
-        print(f'STD: {np.std(percent_error)}')
-        tol = 0.05
-        num_vals_outside_error = (percent_error > tol).sum()
-        print(f'# of points outside {tol*100}% error: {num_vals_outside_error} ({num_vals_outside_error/len(percent_error)}% of data)\n')
-
-        plt.figure()
-        plt.hist(percent_error, bins=np.arange(0, 0.3, 0.005))
-        plt.title('Percent Error')
-
-        print('ABSOLUTE ERRORS')
-        print(f'Mean: {np.mean(absolute_error)}')
-        print(f'Median: {np.median(absolute_error)}')
-        print(f'Max: {np.max(absolute_error)}')
-        print(f'STD: {np.std(absolute_error)}')
-
-        plt.figure()
-        plt.hist(np.log10(absolute_error))
-        plt.title('Absolute Error')
-

@@ -223,7 +223,7 @@ class ReactionNetwork:
                 rtol=1e-10,
                 jac=self.jacobian,
                 max_step=(t_range[1]-t_range[0])/1e3,
-                first_step=(t_range[1]-t_range[0])/1e12,
+                first_step=0.25,
                 t_eval=t_eval)
         elif self.compute_sensitivities == True:
             # pad the initial condition with zeros
@@ -235,7 +235,7 @@ class ReactionNetwork:
                 rtol=1e-10,
                 jac=self.jacobian_sensitivities,
                 max_step=(t_range[1]-t_range[0])/1e3,
-                first_step=(t_range[1]-t_range[0])/1e12,
+                first_step=0.25,
                 t_eval=t_eval)
         return soln.t, soln.y
 
@@ -245,7 +245,7 @@ class ReactionNetwork:
                 rtol=1e-10,
                 jac=self.jacobian,
                 max_step=tf/1e3,
-                first_step=tf/1e12,
+                first_step=0.25,
                 t_eval=[tf])
         elif self.compute_sensitivities == True:
             # pad the initial condition with zeros
@@ -257,7 +257,7 @@ class ReactionNetwork:
                 rtol=1e-10,
                 jac=self.jacobian_sensitivities,
                 max_step=tf/1e3,
-                first_step=tf/1e12,
+                first_step=0.25,
                 t_eval=[tf])
         return soln.y.flatten()[QoI]
 

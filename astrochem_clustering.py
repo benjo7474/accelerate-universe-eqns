@@ -5,12 +5,10 @@
 
 from types import NoneType
 import numpy as np
-import pandas as pd
-import sklearn.cluster
 from nelson_langer_network import build_nelson_network
-import faiss
-from recursive_clustering import Cluster, ClusterTree, recursive_cluster_algorithm, flatten_cluster_centers
+from recursive_clustering import recursive_cluster_algorithm, flatten_cluster_centers
 from taylor_grad_boost_KNN import GradientBoostModel
+import matplotlib.pyplot as plt
 
 
 class AstrochemClusterModel:
@@ -35,14 +33,17 @@ class AstrochemClusterModel:
         sensitivities: np.ndarray = None
     ):
         
+        self.x0 = x0
+        self.QoI = QoI
+        self.time = time
+        self.p_to_q = lambda p: self._solve_nelson_network(p, x0, QoI, time)
+        self.p_to_q_and_dqdp = lambda p: self._solve_nelson_network_with_sensitivities(p, x0, QoI, time)
+        
         # if we need to do clustering, do this first.
         # this will come with ode solves
         # TODO: implement gradient?
         if do_clustering == True:
-            k, cluster_tree = recursive_cluster_algorithm(
-                training_data, lambda p: self._solve_nelson_network(p, x0, QoI, time),
-                error_tol, N, ss, ode_solves
-            )
+            k, cluster_tree = recursive_cluster_algorithm(training_data, self.p_to_q, error_tol, N, ss, ode_solves)
             new_centroids, new_ode_solves = flatten_cluster_centers(k, 1, cluster_tree)
             self.KNN_model = GradientBoostModel(new_centroids, new_ode_solves)
             self.N_clusters = k
@@ -63,10 +64,9 @@ class AstrochemClusterModel:
                     sensitivities = None
                 for j, row in enumerate(training_data):
                     if use_gradient_boost == False:
-                        ode_solves[j] = self._solve_nelson_network(row, x0, QoI, time)
+                        ode_solves[j] = self.p_to_q(row)
                     elif use_gradient_boost == True:
-                        ode_solves[j], sensitivities[j,:] = \
-                            self._solve_nelson_network_with_sensitivities(row, x0, QoI, time)
+                        ode_solves[j], sensitivities[j,:] = self.p_to_q_and_dqdp(row)
 
                 self.KNN_model = GradientBoostModel(training_data, ode_solves, sensitivities)
                 self.N_clusters = len(training_data)
@@ -83,6 +83,12 @@ class AstrochemClusterModel:
         
         self.model_trained = True
 
+
+    def predict(self, targets: np.ndarray, k=1, disp_time=False):
+        if targets.ndim == 1:
+            return self.KNN_model.predict(np.reshape(targets, (1,3)), k, unwrap_log=[True, True, False], disp_time=True)
+        else:
+            return self.KNN_model.predict(targets, k, unwrap_log=[True, True, False], disp_time=True)
 
 
     # method takes in un-normalized parameters via numpy
@@ -107,4 +113,132 @@ class AstrochemClusterModel:
         soln = yvec.flatten()
         grad_indices = np.array([14, 28, 42]) + QoI
         return soln[QoI], soln[grad_indices]
+
+
+    ### --- TESTS --- ###
+
+    # given a matrix of features and a list of true values, use above function to predict,
+    # followed by comparing the accuracy to true_values and displaying error statistics.
+    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray, k: int):
+
+        # TODO check if length of targets and true_values matches
+        # TODO check if length of each feature vector matches length of training vectors
+
+        predicted_values = self.predict(targets, disp_time=True)
+        absolute_error = np.abs(predicted_values - true_values)
+        percent_error = absolute_error / np.abs(true_values)
+
+        print('PERCENT ERRORS')
+        print(f'Mean: {np.mean(percent_error)}')
+        print(f'Median: {np.median(percent_error)}')
+        print(f'Max: {np.max(percent_error)}')
+        print(f'STD: {np.std(percent_error)}')
+        tol = 0.01
+        num_vals_outside_error = (percent_error > tol).sum()
+        print(f'# of points outside {tol*100}% error: {num_vals_outside_error} ({num_vals_outside_error/len(percent_error)}% of data)\n')
+
+        plt.figure()
+        plt.hist(percent_error, bins=np.arange(0, tol, 0.01*tol))
+        plt.title('Percent Error')
+        plt.show()
+
+        print('ABSOLUTE ERRORS')
+        print(f'Mean: {np.mean(absolute_error)}')
+        print(f'Median: {np.median(absolute_error)}')
+        print(f'Max: {np.max(absolute_error)}')
+        print(f'STD: {np.std(absolute_error)}\n')
+
+        plt.figure()
+        plt.hist(np.log10(absolute_error))
+        plt.title('Absolute Error')
+        plt.show()
+
+        return percent_error, absolute_error
+
+    
+    # plot the convex combination from the closest source to the target
+    # also plot the slices (1% in each direction)
+    def convex_NN_plot(self, p: np.ndarray):
+
+        # compute nearest neighbor and compute directional derivative from this point
+        D, I = self.KNN_model._faiss_index.search(np.reshape(p, (1,3)), 1)
+        closest_point = self.KNN_model.features[I[0,0]]
+        closest_value = self.KNN_model.labels[I[0,0]]
+        print(f'Point: {p}')
+        prediction = self.predict(np.reshape(p, (1,3)), 1)
+
+        print(f'Point: {p}')
+        print(f'Nearest neighbor: {closest_point}')
+
+        alphavec = np.linspace(-0.05, 1.05, 200)
+        convex_grid = np.outer((1-alphavec), closest_point) + np.outer(alphavec, p)
+        qvec = np.zeros(len(convex_grid))
+        for i, val in enumerate(convex_grid):
+            qvec[i] = self.p_to_q(val)
+        
+        plt.figure()
+        plt.plot(alphavec, qvec, label='$q$')
+        plt.xlabel('Nearest neighbor to parameter of interest')
+        plt.ylabel('$q$')
+        plt.title(f'Plot from NN {np.array2string(closest_point, precision=2)} to p {np.array2string(p, precision=2)}')
+        plt.xlim([-0.05, 1.05])
+        plt.scatter([1], [closest_value], marker='x', label='0th order approx.')
+        plt.scatter([1], [prediction], marker='x', label='1st order approx. (grad boost)')
+        plt.scatter([1], [self.p_to_q(p)], marker='x', label='Exact')
+        plt.legend()
+        plt.show()
+
+    
+    def generate_slice_plots(self, p):
+
+        pert = 0.1 * p
+        nh_pert = pert[0]
+        T_pert = pert[1]
+        G0_pert = pert[2]
+        eye = np.eye(3)
+
+        # slice in n_h
+        nh_pert_vec = np.linspace(start=-nh_pert, stop=nh_pert, num=100)
+        qvec1 = np.zeros(len(nh_pert_vec))
+        for i, pert in enumerate(nh_pert_vec):
+            qvec1[i] = self.p_to_q(p + pert*eye[0])
+
+        # slice in T
+        T_pert_vec = np.linspace(start= -T_pert, stop=T_pert, num=100)
+        qvec2 = np.zeros(len(T_pert_vec))
+        for i, pert in enumerate(T_pert_vec):
+            qvec2[i] = self.p_to_q(p + pert*eye[1])
+
+        # slice in G0
+        G0_pert_vec = np.linspace(start= -G0_pert, stop=G0_pert, num=100)
+        qvec3 = np.zeros(len(G0_pert_vec))
+        for i, pert in enumerate(G0_pert_vec):
+            qvec3[i] = self.p_to_q(p + pert*eye[2])
+
+        # plot
+        plt.figure()
+        plt.plot(p[0] + nh_pert_vec, qvec1)
+        plt.ylim(qvec1.min(), qvec1.max())
+        plt.xlabel('$\log(n_h)$')
+        plt.ylabel('$q$')
+        plt.title('$\\log(n_h)$ Slice Plot ($\\log(T)$ and $G_0$ fixed)')
+        plt.show()
+
+        plt.figure()
+        plt.plot(p[1] + T_pert_vec, qvec2)
+        plt.ylim(qvec2.min(), qvec2.max())
+        plt.xlabel('$\log(T)$')
+        plt.ylabel('$q$')
+        plt.title('$\\log(T)$ Slice Plot ($\\log(n_h)$ and $G_0$ fixed)')
+        plt.show()
+
+        plt.figure()
+        plt.plot(p[2] + G0_pert_vec, qvec3, label='$\\log(n_h)$ and $\\log(T)$ fixed')
+        plt.ylim(qvec2.min(), qvec2.max())
+        plt.xlabel('$G_0$')
+        plt.ylabel('$q$')
+        plt.title('$G_0$ Slice Plot ($\\log(T)$ and $\\log(n_h)$ fixed)')
+        plt.show()
+
+
 

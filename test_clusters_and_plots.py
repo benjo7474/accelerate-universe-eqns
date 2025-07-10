@@ -11,7 +11,6 @@ import time
 import torch
 from astrochem_clustering import AstrochemClusterModel
 import matplotlib.pyplot as plt
-from taylor_grad_boost_KNN import GradientBoostModel
 
 # Load parameters
 
@@ -219,79 +218,65 @@ def better_sampling_algorithm():
 
 
 
-
-# ---- FUNCTIONS TO GENERATE DATA FILES ---- #
-
-
-
-
 # ---- FUNCTIONS TO BUILD CLUSTER MODELS ---- #
 
 
-def test_taylor_grad_boost_KNN_class():
+def test_model(N=150000, tf_index=2, k=1):
 
-    input_data = np.load('input_parameters.npy')
-    output_data = np.load('output_data_xCO_with_sens.npy')
-    model = GradientBoostModel(input_data[:800,:], output_data[:800,0,0], output_data[:800,1:4,0])
+    # load data
+    p = np.load('input_p.npy') # this is in normal form
+    p[:,[0,1]] = np.log10(p[:,[0,1]])
+    q = np.load('output_q_CO.npy')
+    dqdp = np.load('output_dqdp_CO.npy')
 
-    model.test_accuracy(input_data[800:,:], output_data[800:,0,0])
+    # 0.1K years = 0
+    # 1K years = 1
+    # 10K years = 2
+    # 40K years = 3
+    q_tf = q[:,tf_index]
+    dqdp_tf = dqdp[:,:,tf_index]
 
+    # pick points to use in data
+    indices = np.arange(len(p), dtype=int)
+    N_train = int(0.8 * N)
+    rand_inds = np.random.choice(indices, N, replace=False)
+    train_inds = rand_inds[:N_train]
+    test_inds = rand_inds[N_train:]
 
-
-def train_model(train_data):
-    sample = train_data.sample(1000).to_numpy()
-    params = sample[:,0:3]
-    solves = sample[:,16]
-
-    # some testing
-    # j = 1056
-    # p = params[j]
-    # p[0] = 10 ** p[0]
-    # p[1] = 10 ** p[1]
-    # q1 = solves[j]
-    # NL = build_nelson_network(params=p, compute_sensitivities=False)
-    # q2 = NL.solve_reaction_snapshot(x0, tf, 9)
-    # print(q1)
-    # print(q2)
-
-    start_time = time.perf_counter()
     surrogate = AstrochemClusterModel()
-    surrogate.train_model(params, QoI_indices, x0, tf, 10, 10, 
-                          do_clustering=False, use_gradient_boost=False, ode_solves = solves)
-    end_time = time.perf_counter()
+    surrogate.train_model(p[train_inds], 9, x0, tf, use_gradient_boost=True,
+                          ode_solves=q_tf[train_inds], sensitivities=dqdp_tf[train_inds])
 
-    total_time = end_time - start_time # in seconds
-    print(f'Training time: {total_time:.2f} seconds')
+    percent_error, absolute_error = surrogate.test_accuracy(p[test_inds], q_tf[test_inds], k)
+    bad_p_ind = np.argmax(percent_error)
+    bad_p = p[test_inds][bad_p_ind]
+    # good_p_ind = np.argmin(percent_error)
+    # good_p = p[test_inds][good_p_ind]
+    surrogate.convex_NN_plot(bad_p)
+    surrogate.generate_slice_plots(bad_p)
+    
+
+
+
+def train_model():
+    
+    input = np.load('input_parameters.npy')
+    output = np.load('output_data_xCO_with_sens.npy')
+
+    q = output[:,0,2]
+    dqdp = output[:,1:4,2]
+
+    print(input.shape)
+    print(q.shape)
+    print(dqdp.shape)
+
+    surrogate = AstrochemClusterModel()
+    surrogate.train_model(input, 9, x0, tf,
+                          do_clustering=False, use_gradient_boost=True,
+                          ode_solves=q, sensitivities=dqdp)
+
     return surrogate
 
-
-# Bonus test case where we use the MAX number of source points;
-# i.e. each training data point as a cluster centroid.
-def train_model_max(train_data):
-    surrogate = AstrochemClusterModel()
-    surrogate.train_surrogate_model_max_targets(train_data.reset_index(drop=True), [2,0,1,9,5], x0, tf, ode_solve_columns)
-    return surrogate
-
-
-def test_from_faiss_object(faiss_index, QoI_values, QoI_values_ind, test):
-    start_time = time.perf_counter()
-    D, I = faiss_index.search(test.to_numpy()[:,[0,1,2]], 1)
-    end_time = time.perf_counter()
-    total_time = end_time - start_time # in seconds
-    print(f'Time: {total_time:.2f} seconds')
-
-    datamat = np.zeros(shape=(len(test),24))
-    datamat[:,[0,1,2,3,4]] = test.to_numpy()[:,QoI_values_ind] # exact (already solved)
-    datamat[:,5] = I[:,0]
-    datamat[:,[6,7,8,9,10]] = QoI_values[I[:,0]] # predicted values
-    # percent errors
-    datamat[:,[11,12,13,14,15]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]]) / np.abs(datamat[:,[0,1,2,3,4]])
-    # relative errors
-    datamat[:,[16,17,18,19,20]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]])
-    # test data
-    datamat[:,[21,22,23]] = test.to_numpy()[:,[0,1,2]]
-
-    return faiss_index, datamat
 
 
 # If we want to save the surrogate, we need to use pickle 
@@ -333,35 +318,6 @@ def test_from_surrogate_object_no_ode_solves(surrogate, test):
     return datamatrix_to_pandas(datamat)
 
 
-def test_from_surrogate_object_ode_solves(surrogate, test):
-
-    start_time = time.perf_counter()
-    datamat = np.zeros(shape=(len(test),24))
-    # Exact solution for e, H2, H3+, CO, C in columns 0-4
-    # Index in column 5
-    # Predictions in columns 6-10
-    # Relative errors in columns 11-15
-    # Absolute errors in columns 16-20
-    # Test data in columns 21-23
-
-    # exact solutions
-    for j, row in enumerate(test.to_numpy()):
-        datamat[j, [0,1,2,3,4]] = solve_nelson_network(row[0:3], x0, QoI_indices, tf)
-    mid_time = time.perf_counter()
-    # predictions
-    datamat[:,[5,6,7,8,9,10]] = surrogate.predict(test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy())
-    end_time = time.perf_counter()
-    print(f'Time to solve all ODEs: {mid_time-start_time} seconds')
-    print(f'Time to predict data: {end_time-mid_time}')
-    # relative errors
-    datamat[:,[11,12,13,14,15]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]]) / np.abs(datamat[:,[0,1,2,3,4]])
-    # absolute errors
-    datamat[:,[16,17,18,19,20]] = np.abs(datamat[:,[6,7,8,9,10]] - datamat[:,[0,1,2,3,4]])
-    # test data
-    datamat[:,[21,22,23]] = test[['$\log(n_h)$','$\log(T)$','$G_0$']].to_numpy()
-
-    return datamatrix_to_pandas(datamat)
-
 
 def datamatrix_to_pandas(datamat):
     pandas_datamat = pd.DataFrame(data=datamat, columns=[
@@ -393,22 +349,19 @@ def datamatrix_to_pandas(datamat):
     return pandas_datamat
 
 
-# if __name__ == '__main__':
-#     train, test = load_medium_dataset_with_ode_solves()
-#     surrogate = train_model_max(train)
-#     data = test_from_surrogate_object_no_ode_solves(surrogate, test)
-#     print(data)
+if __name__ == '__main__':
+    test_model(N=12500, k=1, tf_index=2)
 
 
-# %%
-train, test = load_full_dataset_with_ode_solves()
-test = test.sample(100)
-# %%
-surrogate = train_model(train)
-# save_surrogate(surrogate, 'surrogate.pkl')
-# %%
-surrogate.KNN_model.test_accuracy(test.to_numpy()[:,0:3], test.to_numpy()[:,16], 1)
+# # %%
+# train, test = load_full_dataset_with_ode_solves()
+# test = test.sample(100).to_numpy()
 
+# # %%
+# surrogate = train_model()
+# surrogate.KNN_model.test_accuracy(test[:,0:3], test.to_numpy()[:,16], 1)
+# # %%
+# test_taylor_grad_boost_KNN_class()
 
 
 

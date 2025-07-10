@@ -82,43 +82,6 @@ def p_to_dqdp_map(p: np.ndarray, tf):
     return np.matrix.flatten(y)[[23, 37, 51]]
 
 
-def generate_slice_plots(p, tf_years):
-
-    secs_per_year = 3600*24*365
-    tf = tf_years * secs_per_year
-    pert = 0.1 * p
-    nh_pert = pert[0]
-    T_pert = pert[1]
-    G0_pert = pert[2]
-    eye = np.eye(3)
-
-    # slice in n_h
-    nh_pert_vec = np.linspace(start=-nh_pert, stop=nh_pert, num=100)
-    qvec1 = np.zeros(len(nh_pert_vec))
-    for i, pert in enumerate(nh_pert_vec):
-        qvec1[i] = p_to_q_map(p + pert*eye[0], tf)
-    plt.figure()
-    plt.plot(p[0] + nh_pert_vec, qvec1)
-    plt.ylim(qvec1.min(), qvec1.max())
-
-    # slice in T
-    T_pert_vec = np.linspace(start= -T_pert, stop=T_pert, num=100)
-    qvec2 = np.zeros(len(T_pert_vec))
-    for i, pert in enumerate(T_pert_vec):
-        qvec2[i] = p_to_q_map(p + pert*eye[1], tf)
-    plt.figure()
-    plt.plot(p[1] + T_pert_vec, qvec2)
-    plt.ylim(qvec2.min(), qvec2.max())
-
-    # slice in G0
-    G0_pert_vec = np.linspace(start= -G0_pert, stop=G0_pert, num=100)
-    qvec3 = np.zeros(len(G0_pert_vec))
-    for i, pert in enumerate(G0_pert_vec):
-        qvec3[i] = p_to_q_map(p + pert*eye[2], tf)
-    plt.figure()
-    plt.plot(p[2] + G0_pert_vec, qvec3)
-    plt.ylim(qvec2.min(), qvec2.max())
-
 
 def p_to_dqdp_map_FD(p: np.ndarray, tf):
 
