@@ -221,13 +221,13 @@ def better_sampling_algorithm():
 # ---- FUNCTIONS TO BUILD CLUSTER MODELS ---- #
 
 
-def test_model(N=150000, tf_index=2, k=1):
+def test_model(N_train=10000, N_test=5000, tf_index=2, k=1):
 
     # load data
-    p = np.load('input_p.npy') # this is in normal form
+    p = np.load('data/input_p.npy') # this is in normal form
     p[:,[0,1]] = np.log10(p[:,[0,1]])
-    q = np.load('output_q_CO.npy')
-    dqdp = np.load('output_dqdp_CO.npy')
+    q = np.load('data/output_q_CO.npy')
+    dqdp = np.load('data/output_dqdp_CO.npy')
 
     # 0.1K years = 0
     # 1K years = 1
@@ -238,45 +238,57 @@ def test_model(N=150000, tf_index=2, k=1):
 
     # pick points to use in data
     indices = np.arange(len(p), dtype=int)
-    N_train = int(0.8 * N)
-    rand_inds = np.random.choice(indices, N, replace=False)
+    rand_inds = np.random.choice(indices, N_train + N_test, replace=False)
     train_inds = rand_inds[:N_train]
     test_inds = rand_inds[N_train:]
 
     surrogate = AstrochemClusterModel()
-    surrogate.train_model(p[train_inds], 9, x0, tf, use_gradient_boost=True,
+    surrogate.train_model(p[train_inds], 5, x0, tf, use_gradient_boost=True,
                           ode_solves=q_tf[train_inds], sensitivities=dqdp_tf[train_inds])
 
-    percent_error, absolute_error = surrogate.test_accuracy(p[test_inds], q_tf[test_inds], k)
-    bad_p_ind = np.argmax(percent_error)
-    bad_p = p[test_inds][bad_p_ind]
+    # percent_error, absolute_error = surrogate.test_accuracy(p[test_inds], q_tf[test_inds], k)
+    # bad_p_ind = np.argmax(percent_error)
+    # bad_p = p[test_inds][bad_p_ind]
     # good_p_ind = np.argmin(percent_error)
     # good_p = p[test_inds][good_p_ind]
-    surrogate.convex_NN_plot(bad_p)
-    surrogate.generate_slice_plots(bad_p)
+    # surrogate.convex_NN_plot(bad_p)
+    # surrogate.generate_slice_plots(bad_p)
+
+    surrogate.plot_point_cloud(p[train_inds], p[test_inds])
     
 
 
 
-def train_model():
+def train_and_test_model():
     
-    input = np.load('input_parameters.npy')
-    output = np.load('output_data_xCO_with_sens.npy')
+    p = np.load('data/input_p.npy')
+    p[:,[0,1]] = np.log10(p[:,[0,1]])
+    q = np.load('data/output_q_CO.npy')
+    dqdp = np.load('data/output_dqdp_CO.npy')
 
-    q = output[:,0,2]
-    dqdp = output[:,1:4,2]
-
-    print(input.shape)
-    print(q.shape)
-    print(dqdp.shape)
+    N_train = 30000
+    N_test = 5000
+    p_train = p[:N_train]
+    q_train = q[:N_train,2]
+    dqdp_train = dqdp[:N_train,:,2]
+    p_test = p[N_train:(N_train+N_test)]
+    q_test = q[N_train:(N_train+N_test),2]
 
     surrogate = AstrochemClusterModel()
-    surrogate.train_model(input, 9, x0, tf,
-                          do_clustering=False, use_gradient_boost=True,
-                          ode_solves=q, sensitivities=dqdp)
+    start = time.perf_counter()
+    surrogate.train_model(p_train, 9, x0, tf, error_tol=0.01,
+                          do_clustering=True, use_gradient_boost=True,
+                          ode_solves=q_train, sensitivities=dqdp_train)
+    stop = time.perf_counter()
+    print(f'Time to cluster: {stop-start:.2f} seconds')
+    print(surrogate.N_clusters)
 
-    return surrogate
-
+    rel_err, _ = surrogate.test_accuracy(p_test, q_test, 1)
+    # good_p_ind = np.argmin(rel_err)
+    # good_p = p_test[good_p_ind]
+    # surrogate.convex_NN_plot(good_p)
+    # surrogate.generate_slice_plots(good_p)
+    surrogate.plot_point_cloud(p_train, p_test)
 
 
 # If we want to save the surrogate, we need to use pickle 
@@ -350,7 +362,9 @@ def datamatrix_to_pandas(datamat):
 
 
 if __name__ == '__main__':
-    test_model(N=12500, k=1, tf_index=2)
+    surrogate = train_and_test_model()
+    save_surrogate(surrogate, 'data/grad_surrogate.pkl')
+    # test_model(N_train=30000, N_test=5000, k=1, tf_index=2)
 
 
 # # %%

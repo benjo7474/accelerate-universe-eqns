@@ -6,7 +6,9 @@
 from types import NoneType
 import numpy as np
 from nelson_langer_network import build_nelson_network
-from recursive_clustering import recursive_cluster_algorithm, flatten_cluster_centers
+from recursive_clustering import \
+    recursive_cluster_algorithm, flatten_cluster_centers, \
+    flatten_cluster_centers_with_gradient
 from taylor_grad_boost_KNN import GradientBoostModel
 import matplotlib.pyplot as plt
 
@@ -41,11 +43,20 @@ class AstrochemClusterModel:
         
         # if we need to do clustering, do this first.
         # this will come with ode solves
-        # TODO: implement gradient?
         if do_clustering == True:
-            k, cluster_tree = recursive_cluster_algorithm(training_data, self.p_to_q, error_tol, N, ss, ode_solves)
-            new_centroids, new_ode_solves = flatten_cluster_centers(k, 1, cluster_tree)
-            self.KNN_model = GradientBoostModel(new_centroids, new_ode_solves)
+            if use_gradient_boost == False:
+                k, cluster_tree = recursive_cluster_algorithm(
+                    training_data, self.p_to_q, error_tol, N, ss, use_gradient_boost,
+                    [True, True, False], ode_solves, sensitivities)
+                new_centroids, new_ode_solves = flatten_cluster_centers(k, cluster_tree)
+                self.KNN_model = GradientBoostModel(new_centroids, new_ode_solves)
+            elif use_gradient_boost == True:
+                k, cluster_tree = recursive_cluster_algorithm(
+                    training_data, self.p_to_q_and_dqdp, error_tol, N, ss, use_gradient_boost,
+                    [True, True, False], ode_solves, sensitivities)
+                new_centroids, new_ode_solves, new_sensitivities = flatten_cluster_centers_with_gradient(k, cluster_tree)
+                self.KNN_model = GradientBoostModel(new_centroids, new_ode_solves, new_sensitivities)
+            
             self.N_clusters = k
 
         # otherwise use every point in training_data as a centroid.
@@ -138,8 +149,17 @@ class AstrochemClusterModel:
         print(f'# of points outside {tol*100}% error: {num_vals_outside_error} ({num_vals_outside_error/len(percent_error)}% of data)\n')
 
         plt.figure()
-        plt.hist(percent_error, bins=np.arange(0, tol, 0.01*tol))
-        plt.title('Percent Error')
+        plt.hist(percent_error, bins=np.arange(0, 1.01*percent_error.max(), 0.01*percent_error.max()))
+        plt.yscale('log')
+        plt.title(f'Relative Error xCO ($N_s = {self.N_clusters}, N_t = {len(targets)}$)', fontsize=14)
+        plt.xlabel('Relative Error', fontsize=12)
+        plt.ylabel('# Points', fontsize=12)
+        plt.text(1.01*percent_error.max(), 1e3,
+                f'Mean: {np.mean(percent_error):.3e}\n\
+                Median: {np.median(percent_error):.3e}\n\
+                Max: {np.max(percent_error):.3e}\n\
+                STD: {np.std(percent_error):.3e}',
+                fontsize=10, horizontalalignment='right')
         plt.show()
 
         print('ABSOLUTE ERRORS')
@@ -150,7 +170,8 @@ class AstrochemClusterModel:
 
         plt.figure()
         plt.hist(np.log10(absolute_error))
-        plt.title('Absolute Error')
+        plt.yscale('log')
+        plt.title('Absolute Error xCO (with gradient)')
         plt.show()
 
         return percent_error, absolute_error
@@ -240,5 +261,23 @@ class AstrochemClusterModel:
         plt.title('$G_0$ Slice Plot ($\\log(T)$ and $\\log(n_h)$ fixed)')
         plt.show()
 
+
+    
+    def plot_point_cloud(self, train_points, test_points):
+
+        if self.model_trained == True:
+
+            plt.figure()
+            plt.scatter(train_points[:,0], train_points[:,1],
+                        label=f'Training Data ($N={len(train_points)}$)', marker='o', alpha=0.75, c='red')
+            plt.scatter(test_points[:,0], test_points[:,1],
+                        label=f'Testing Data ($N={len(test_points)}$)', marker='o', alpha=0.75, c='green')
+            plt.scatter(self.KNN_model.features[:,0], self.KNN_model.features[:,1],
+                        label=f'New sources from clustering ($N={len(self.KNN_model.features)}$)', marker='.', c='blue')
+            plt.legend()
+            plt.xlabel('$\\log_{10}(n_h)$', fontsize=12)
+            plt.ylabel('$\\log_{10}(T)$', fontsize=12)
+            plt.title('Clustering', fontsize=13)
+            plt.show()
 
 

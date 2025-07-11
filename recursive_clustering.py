@@ -16,10 +16,11 @@ class ClusterTree:
 
 class Cluster:
 
-    def __init__(self, index, params, QoI_value):
+    def __init__(self, index, params, QoI_value, gradient):
         self.index = index
         self.params = params
         self.QoI_value = QoI_value
+        self.gradient = gradient
 
     def __str__(self):
         return f'k={self.index}\tn_h={10**self.params[0]:.3f}\tT={10**self.params[1]:.3f}\tG0={self.params[2]:.6f}'
@@ -29,10 +30,15 @@ class Cluster:
 def recursive_cluster_algorithm(
     training_data: np.ndarray, # each row contains a set of parameters used to cluster
     eval_function: Callable, # callable function; takes numpy array to numpy array
+        # if use gradient is true, eval_function should return both value and gradient.
+        # otherwise eval_function only returns value
     error_tol: float,
     N: int = 10, # number of initial clusters to split into
     ss: int = 40, # sample size used to compute statistics in each cluster
+    use_gradient: bool = False,
+    unpack_log = [False, False, False],
     ode_solves: np.ndarray = None, # if this is not none, uses these as solves. Otherwise runs eval_function every time
+    gradients: np.ndarray = None # save with these for gradients
     ):
 
     # normalize the training data
@@ -56,17 +62,20 @@ def recursive_cluster_algorithm(
             ode_solves_in_cluster = None
         else:
             ode_solves_in_cluster = ode_solves[labels==j]
+        if type(gradients) == NoneType:
+            gradients_in_cluster = None
+        else:
+            gradients_in_cluster = gradients[labels==j]
 
         ss_new = ss
         if len(params_in_cluster) < ss:
             ss_new = len(params_in_cluster)
         
         centroid_params = centroids[j]
-        qc = eval_function(centroid_params)
-
-        # this is a quick fix for the issue of #s of QoI
-        if type(qc) != np.ndarray:
-            qc = np.array([qc])
+        if use_gradient == True:
+            qc, dqdpc = eval_function(centroid_params)
+        else:
+            qc = eval_function(centroid_params)
         
 
         # Compute error via max_{j=1,...,ss}(q_c - q_j) / q_c
@@ -80,23 +89,44 @@ def recursive_cluster_algorithm(
         # Compute error by taking largest distances away and averaging errors
         distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster, axis=1)
         largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
-        dvec = np.empty(shape=(ss_new, len(qc)))
+        dvec = np.empty(shape=ss_new)
         for i, row in enumerate(params_in_cluster[largest_row_indices]):
+            # compute true value (save in qi)
             if type(ode_solves_in_cluster) == NoneType:
-                qi = eval_function(row)
+                if use_gradient == False:
+                    qi = eval_function(row)
+                elif use_gradient == True:
+                    qi, _ = eval_function(row)
             else:
                 qi = ode_solves_in_cluster[largest_row_indices[i]]
-            dvec[i,:] = np.abs(qc-qi)
-        error = np.max(dvec / qc)
+                
+            # using true value, compute error from qc
+            if use_gradient == False:
+                dvec[i] = np.abs(qc-qi) # no gradient (0th order)
+            elif use_gradient == True:
+                # error is given by gradient
+                # make sure we compute in euclidean, non-log scaled distance
+                # use unpack_log to know which variables to do
+                row_nonlog = np.copy(row)
+                qc_nonlog = np.copy(centroid_params)
+                for l, val in enumerate(unpack_log):
+                    if val == True:
+                        row_nonlog[l] = 10 ** row_nonlog[l]
+                        qc_nonlog[l] = 10 ** qc_nonlog[l]
+                distance = row_nonlog - qc_nonlog
+                dvec[i] = np.abs(qi - (qc + np.dot(dqdpc, distance)))
+
+        error = np.max(dvec / qc) # relative error
 
         if error > error_tol:
             # Split cluster in half (recursive step)
             k, cluster_structure[j] = _recursive_cluster_algorithm_helper(
                     params_in_cluster, centroid_params, error_tol,
-                    eval_function, ss, ode_solves_in_cluster, k)
+                    eval_function, ss, use_gradient, unpack_log,
+                    ode_solves_in_cluster, gradients_in_cluster, k)
         else:
             # Tolerance is good; save values in cluster column
-            cluster_structure[j] = Cluster(k, centroid_params, qc)
+            cluster_structure[j] = Cluster(k, centroid_params, qc, dqdpc)
             k += 1
 
 
@@ -110,7 +140,10 @@ def _recursive_cluster_algorithm_helper(
     error_tol: float,
     eval_function: Callable,
     ss: int = 40, # sample size used to compute statistics in each cluster
+    use_gradient: bool = False,
+    unpack_log = [False, False, False],
     ode_solves: np.ndarray = None,
+    gradients: np.ndarray = None, # save with these for gradients
     k: int = 0, # current cluster index (for recursive purposes)
 ):
 
@@ -134,6 +167,10 @@ def _recursive_cluster_algorithm_helper(
         ode_solves_in_cluster_0 = None
     else:
         ode_solves_in_cluster_0 = ode_solves[labels==0]
+    if type(gradients) == NoneType:
+        gradients_in_cluster_0 = None
+    else:
+        gradients_in_cluster_0 = gradients[labels==0]
 
     ss_new = ss
     if len(params_in_cluster_0) < ss:
@@ -141,35 +178,56 @@ def _recursive_cluster_algorithm_helper(
         ss_new = len(params_in_cluster_0)
 
     centroid_params = centroids[0]
-    qc = eval_function(centroid_params)
-
-    # this is a quick fix for the issue of #s of QoI
-    if type(qc) != np.ndarray:
-        qc = np.array([qc])
+    if use_gradient == True:
+        qc, dqdpc = eval_function(centroid_params)
+    else:
+        qc = eval_function(centroid_params)
 
 
     # Compute error by taking largest distances away and averaging errors
-    # can make this block wayyyy faster using either faiss or matrices
+    # can make this block wayyyy faster using either faiss or matrices?
     distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_0, axis=1)
     largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
-    dvec = np.empty(shape=(ss_new, len(qc)))
+    dvec = np.empty(ss_new)
     for i, row in enumerate(params_in_cluster_0[largest_row_indices]):
+        # compute true value
         if type(ode_solves_in_cluster_0) == NoneType:
-            qi = eval_function(row)
+            if use_gradient == False:
+                qi = eval_function(row)
+            elif use_gradient == True:
+                qi, _ = eval_function(row)
         else:
             qi = ode_solves_in_cluster_0[largest_row_indices[i]]
-        dvec[i,:] = np.abs(qc-qi)
+
+        # using true value, compute error from qc
+        if use_gradient == False:
+            dvec[i] = np.abs(qc-qi)
+        elif use_gradient == True:
+            # error is given by gradient
+            # make sure we compute in euclidean, non-log scaled distance
+            # use unpack_log to know which variables to do
+            row_nonlog = np.copy(row)
+            qc_nonlog = np.copy(centroid_params)
+            for l, val in enumerate(unpack_log):
+                if val == True:
+                    row_nonlog[l] = 10 ** row_nonlog[l]
+                    qc_nonlog[l] = 10 ** qc_nonlog[l]
+            distance = row_nonlog - qc_nonlog
+            dvec[i] = np.abs(qi - (qc + np.dot(dqdpc, distance)))
+
     error = np.max(dvec / qc)
 
-    if error > error_tol:
-        # Split cluster in half (recursive step)
+    if len(params_in_cluster_0) == 1 or error < error_tol:
+        left = Cluster(k, centroid_params, qc, dqdpc)
+        k += 1
+        print(f'WARNING\n{error}\n{centroid_params}\n{params_in_cluster_0[0]}')
+    else:
+        # Error too large; split cluster in half (recursive step)
         k, left = _recursive_cluster_algorithm_helper(
                 params_in_cluster_0, centroid_params, error_tol,
-                eval_function, ss, ode_solves_in_cluster_0, k)
-    else:
-        # Tolerance is good; save values in cluster column
-        left = Cluster(k, centroid_params, qc)
-        k += 1
+                eval_function, ss, use_gradient, unpack_log,
+                ode_solves_in_cluster_0, gradients_in_cluster_0, k)
+
 
     # Second cluster (N=1)
     params_in_cluster_1 = params[labels==1]
@@ -177,6 +235,10 @@ def _recursive_cluster_algorithm_helper(
         ode_solves_in_cluster_1 = None
     else:
         ode_solves_in_cluster_1 = ode_solves[labels==1]
+    if type(gradients) == NoneType:
+        gradients_in_cluster_1 = None
+    else:
+        gradients_in_cluster_1 = gradients[labels==1]
 
     ss_new = ss
     if len(params_in_cluster_1) < ss:
@@ -184,47 +246,99 @@ def _recursive_cluster_algorithm_helper(
         ss_new = len(params_in_cluster_1)
     
     centroid_params = centroids[1]
-    qc = eval_function(centroid_params)
-
-    # this is a quick fix for the issue of #s of QoI
-    if type(qc) != np.ndarray:
-        qc = np.array([qc])
+    if use_gradient == False:
+        qc = eval_function(centroid_params)
+    elif use_gradient == True:
+        qc, dqdpc = eval_function(centroid_params)
 
     # Compute error by taking largest distances away and averaging errors
     # can make this block wayyyy faster using either faiss or matrices
     distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_1, axis=1)
     largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
-    dvec = np.empty(shape=(ss_new, len(qc)))
+    dvec = np.empty(ss_new)
     for i, row in enumerate(params_in_cluster_1[largest_row_indices]):
+        # compute true value
         if type(ode_solves_in_cluster_1) == NoneType:
-            qi = eval_function(row)
+            if use_gradient == False:
+                qi = eval_function(row)
+            elif use_gradient == True:
+                qi, _ = eval_function(row)
         else:
             qi = ode_solves_in_cluster_1[largest_row_indices[i]]
-        dvec[i,:] = np.abs(qc-qi)
+
+        # compare error from qc
+        if use_gradient == False:
+            dvec[i] = np.abs(qc-qi)
+        elif use_gradient == True:
+            # error is given by gradient
+            # make sure we compute in euclidean, non-log scaled distance
+            # use unpack_log to know which variables to do
+            row_nonlog = np.copy(row)
+            qc_nonlog = np.copy(centroid_params)
+            for l, val in enumerate(unpack_log):
+                if val == True:
+                    row_nonlog[l] = 10 ** row_nonlog[l]
+                    qc_nonlog[l] = 10 ** qc_nonlog[l]
+            distance = row_nonlog - qc_nonlog
+            dvec[i] = np.abs(qi - (qc + np.dot(dqdpc, distance)))
+
     error = np.max(dvec / qc)
 
-    if (error > error_tol).any():
-        # Split cluster in half (recursive step)
+    if len(params_in_cluster_1) == 1 or error < error_tol:
+        right = Cluster(k, centroid_params, qc, dqdpc)
+        k += 1
+        print(f'WARNING\n{error}\n{centroid_params}\n{params_in_cluster_1[0]}')
+    else:
+        # Error too large; split cluster in half (recursive step)
         k, right = _recursive_cluster_algorithm_helper(
                 params_in_cluster_1, centroid_params, error_tol,
-                eval_function, ss, ode_solves_in_cluster_1, k)
-    else:
-        # Tolerance is good; save values in cluster column
-        right = Cluster(k, centroid_params, qc)
-        k += 1
+                eval_function, ss, use_gradient, unpack_log,
+                ode_solves_in_cluster_1, gradients_in_cluster_1, k)
 
     return k, ClusterTree(prev_centroid, left, right)
 
 
 
-def flatten_cluster_centers(nc, nq, tree):
+def flatten_cluster_centers_with_gradient(nc, tree):
     centroids = np.zeros(shape=(nc, 3))
-    QoI_values = np.zeros(shape=(nc, nq))
+    QoI_values = np.zeros(shape=nc)
+    gradients = np.zeros(shape=(nc, 3))
     k = 0
     for val in tree:
         if type(val) == Cluster:
             centroids[k] = val.params
-            QoI_values[k,:] = val.QoI_value
+            QoI_values[k] = val.QoI_value
+            gradients[k] = val.gradient
+            k += 1
+        elif type(val) == ClusterTree:
+            k = _flatten_cluster_centers_with_gradient_helper(val.left, k, centroids, QoI_values, gradients)
+            k = _flatten_cluster_centers_with_gradient_helper(val.right, k, centroids, QoI_values, gradients)
+    return centroids, QoI_values, gradients
+
+
+
+def _flatten_cluster_centers_with_gradient_helper(tree, k, centroids, QoI_values, gradients):
+    if type(tree) == Cluster:
+        centroids[k] = tree.params
+        QoI_values[k] = tree.QoI_value
+        gradients[k] = tree.gradient
+        k += 1
+    elif type(tree) == ClusterTree:
+        k = _flatten_cluster_centers_with_gradient_helper(tree.left, k, centroids, QoI_values, gradients)
+        k = _flatten_cluster_centers_with_gradient_helper(tree.right, k, centroids, QoI_values, gradients)
+    return k
+
+
+
+
+def flatten_cluster_centers(nc, tree):
+    centroids = np.zeros(shape=(nc, 3))
+    QoI_values = np.zeros(shape=nc)
+    k = 0
+    for val in tree:
+        if type(val) == Cluster:
+            centroids[k] = val.params
+            QoI_values[k] = val.QoI_value
             k += 1
         elif type(val) == ClusterTree:
             k = _flatten_cluster_centers_helper(val.left, k, centroids, QoI_values)
@@ -236,7 +350,7 @@ def flatten_cluster_centers(nc, nq, tree):
 def _flatten_cluster_centers_helper(tree, k, centroids, QoI_values):
     if type(tree) == Cluster:
         centroids[k] = tree.params
-        QoI_values[k,:] = tree.QoI_value
+        QoI_values[k] = tree.QoI_value
         k += 1
     elif type(tree) == ClusterTree:
         k = _flatten_cluster_centers_helper(tree.left, k, centroids, QoI_values)
