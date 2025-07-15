@@ -101,7 +101,6 @@ if rank == 0:
 else:
     count = np.zeros_like(count_rows)
     displ = None
-print(f'Rank {rank}; Count {count}; Displ {displ}')
 comm.Gatherv(q_sendbuf, [q_recvbuf, count, displ, MPI.DOUBLE], root=0)
 
 # gather dq/dp
@@ -116,7 +115,6 @@ comm.Gatherv(dqdp_sendbuf, [dqdp_recvbuf, count, displ, MPI.DOUBLE], root=0)
 # finish on the master process
 if rank == 0:
     
-    print('Gather complete (rank {rank})')
     # save outputs
     np.save('output_q.npy', q_recvbuf)
     np.save('output_dqdp.npy', dqdp_recvbuf)
