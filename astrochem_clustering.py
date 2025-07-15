@@ -130,7 +130,7 @@ class AstrochemClusterModel:
 
     # given a matrix of features and a list of true values, use above function to predict,
     # followed by comparing the accuracy to true_values and displaying error statistics.
-    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray, k: int):
+    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray, k: int = 1, title='Relative Error'):
 
         # TODO check if length of targets and true_values matches
         # TODO check if length of each feature vector matches length of training vectors
@@ -151,10 +151,10 @@ class AstrochemClusterModel:
         plt.figure()
         plt.hist(percent_error, bins=np.arange(0, 1.01*percent_error.max(), 0.01*percent_error.max()))
         plt.yscale('log')
-        plt.title(f'Relative Error xCO ($N_s = {self.N_clusters}, N_t = {len(targets)}$)', fontsize=14)
+        plt.title(f'{title} ($N_s = {self.N_clusters}, N_t = {len(targets)}$)', fontsize=14)
         plt.xlabel('Relative Error', fontsize=12)
         plt.ylabel('# Points', fontsize=12)
-        plt.text(1.01*percent_error.max(), 1e3,
+        plt.text(1.01*percent_error.max(), 2e3,
                 f'Mean: {np.mean(percent_error):.3e}\n\
                 Median: {np.median(percent_error):.3e}\n\
                 Max: {np.max(percent_error):.3e}\n\
@@ -269,15 +269,15 @@ class AstrochemClusterModel:
 
             plt.figure()
             plt.scatter(train_points[:,0], train_points[:,1],
-                        label=f'Training Data ($N={len(train_points)}$)', marker='o', alpha=0.75, c='red')
-            plt.scatter(test_points[:,0], test_points[:,1],
-                        label=f'Testing Data ($N={len(test_points)}$)', marker='o', alpha=0.75, c='green')
+                        label=f'Training points using uniform sampling ($N={len(train_points)}$)', marker='o', alpha=0.3, c='red', s=20)
+            # plt.scatter(test_points[:,0], test_points[:,1],
+            #             label=f'Testing Data ($N={len(test_points)}$)', marker='o', alpha=0.3, c='green', s=20)
             plt.scatter(self.KNN_model.features[:,0], self.KNN_model.features[:,1],
-                        label=f'New sources from clustering ($N={len(self.KNN_model.features)}$)', marker='.', c='blue')
+                        label=f'Training points using adaptive clustering ($N={len(self.KNN_model.features)}$)', marker='.', c='blue', s=15)
             plt.legend()
             plt.xlabel('$\\log_{10}(n_h)$', fontsize=12)
             plt.ylabel('$\\log_{10}(T)$', fontsize=12)
-            plt.title('Clustering', fontsize=13)
+            plt.title('Uniform vs. Adaptive Sampling', fontsize=13)
             plt.show()
 
 

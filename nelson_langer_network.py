@@ -9,13 +9,6 @@ shield: int = 1; # CO self-shielding factor
 n_h: float = 611; # hydrogen number density
 T: float = 10; # Temperature
 
-# Can also load random params for n_h and T
-A = np.load('data/tracer_parameter_data.npy')
-j = np.random.randint(low=0, high=A.shape[0])
-# n_h = 2*A[j,0]
-# T = A[j,1]
-# print(f'n_h: {n_h} \t T: {T}')
-
 def build_tensors():
 
     # [H_2, H_3^+, e, He, He^+, C, CH_x, O, OH_x, CO, HCO^+, C^+, M^+, M]

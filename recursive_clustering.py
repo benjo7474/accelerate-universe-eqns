@@ -220,7 +220,6 @@ def _recursive_cluster_algorithm_helper(
     if len(params_in_cluster_0) == 1 or error < error_tol:
         left = Cluster(k, centroid_params, qc, dqdpc)
         k += 1
-        print(f'WARNING\n{error}\n{centroid_params}\n{params_in_cluster_0[0]}')
     else:
         # Error too large; split cluster in half (recursive step)
         k, left = _recursive_cluster_algorithm_helper(
@@ -287,7 +286,6 @@ def _recursive_cluster_algorithm_helper(
     if len(params_in_cluster_1) == 1 or error < error_tol:
         right = Cluster(k, centroid_params, qc, dqdpc)
         k += 1
-        print(f'WARNING\n{error}\n{centroid_params}\n{params_in_cluster_1[0]}')
     else:
         # Error too large; split cluster in half (recursive step)
         k, right = _recursive_cluster_algorithm_helper(
