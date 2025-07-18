@@ -11,6 +11,7 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
+start_time = MPI.Wtime()
 
 ### BROADCAST STEP 
 
@@ -22,16 +23,18 @@ if rank == 0:
     count_rows = [ave + 1 if p < res else ave for p in range(size)]
     count_rows = np.array(count_rows, dtype=int) # number of floats in each array
 
-    displ_rows = [sum(count_rows[:p]) for p in range(size)]
-    displ_rows = np.array(displ_rows, dtype=int) # array index to start at
+    print(f'(Rank {rank}) Count_rows: {count_rows}')
 
 else:
     sendbuf = None
     count_rows = np.empty(size, dtype=int)
-    displ_rows = None
 
 # broadcast count so that every process knows how much data it receives
 comm.Bcast(count_rows, root=0)
+
+# compute displ rows
+displ_rows = [sum(count_rows[:p]) for p in range(size)]
+displ_rows = np.array(displ_rows, dtype=int) # array index to start at
 
 # initialize recvbuf on all processes
 recvbuf = np.empty(shape=(count_rows[rank], n_params), dtype=np.float64)
@@ -40,6 +43,7 @@ recvbuf = np.empty(shape=(count_rows[rank], n_params), dtype=np.float64)
 if rank == 0:
     count = n_params * count_rows
     displ = n_params * displ_rows
+    sendbuf = sendbuf.flatten() # work-around to deal with whatever bug is happening
 else:
     count = n_params * count_rows
     displ = None
@@ -79,43 +83,46 @@ tf_years_eval = np.array([100, 1000, 10000, 40000])
 tf_eval = tf_years_eval * 365 * 24 * 3600
 
 q_sendbuf = np.zeros(shape=(len(recvbuf), len(tf_eval)))
-dqdp_sendbuf = np.zeros(shape=(len(recvbuf), 3, len(tf_eval)))
+dqdp_sendbuf = np.zeros(shape=(len(recvbuf), n_params, len(tf_eval)))
 
 for j, p in enumerate(recvbuf):
-    q, dqdp = solve_for_sensitivities(p, 9, x0, tf_eval)
+    if (p <= 0).any():
+        print(f'(Rank {rank}) ERROR: parameter set p={p} is at index {j} (Global index {displ})')
+    q, dqdp = solve_for_sensitivities(p, int(sys.argv[2]), x0, tf_eval)
     q_sendbuf[j] = q
     dqdp_sendbuf[j] = dqdp
 
 
-# everything seems to work up to here :)
-
-
 ### GATHER STEP
-q_recvbuf = np.zeros(shape=(sum(count_rows), len(tf_eval)), dtype=np.float64)
-dqdp_recvbuf = np.zeros(shape=(sum(count_rows), n_params, len(tf_eval)), dtype=np.float64)
 
 # gather q
 if rank == 0:
+    q_recvbuf = np.zeros(shape=(sum(count_rows), len(tf_eval)), dtype=np.float64)
     count = len(tf_eval) * count_rows
     displ = len(tf_eval) * displ_rows
 else:
-    count = np.zeros_like(count_rows)
+    q_recvbuf = None
+    count = None
     displ = None
 comm.Gatherv(q_sendbuf, [q_recvbuf, count, displ, MPI.DOUBLE], root=0)
 
 # gather dq/dp
 if rank == 0:
+    dqdp_recvbuf = np.zeros(shape=(sum(count_rows), n_params, len(tf_eval)), dtype=np.float64)
     count = len(tf_eval) * n_params * count_rows
     displ = len(tf_eval) * n_params * displ_rows
 else:
-    count = np.zeros_like(count_rows)
+    dqdp_recvbuf = None
+    count = None
     displ = None
 comm.Gatherv(dqdp_sendbuf, [dqdp_recvbuf, count, displ, MPI.DOUBLE], root=0)
 
-# finish on the master process
+# finish on the master process; save outputs
 if rank == 0:
-    
-    # save outputs
-    np.save('output_q.npy', q_recvbuf)
-    np.save('output_dqdp.npy', dqdp_recvbuf)
+    np.save(f'output_q_{sys.argv[2]}.npy', q_recvbuf)
+    np.save(f'output_dqdp_{sys.argv[2]}.npy', dqdp_recvbuf)
+
+end_time = MPI.Wtime()
+
+print(f'(Rank {rank}) Elapsed time: {end_time-start_time:.2f} seconds')
 

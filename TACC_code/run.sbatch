@@ -7,18 +7,18 @@
 ## necessary compute power
 #SBATCH --partition gg
 #SBATCH --nodes 1
-#SBATCH --ntasks-per-node 14
+#SBATCH --ntasks-per-node 144
 #SBATCH --time 00:01:00
 
 ## output
-#SBATCH -o output_file.log
-#SBATCH -e error_file.log
+#SBATCH --output "slurm_output.log"
+#SBATCH --error "slurm_error.log"
 
 ## actual commands
-module load gcc
-module load openmpi
-module load cuda
-module load python3_mpi
+module load gcc/15.1.0
+module load openmpi/5.0.7
+module load cuda/12.6
+module load python3_mpi/3.11.8
 
-ibrun python3 generate_nelson_data_TACC.py "input_p_small.npy"
+ibrun python3 generate_nelson_data_TACC.py "input_p_small.npy" 9
 

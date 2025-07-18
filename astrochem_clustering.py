@@ -149,6 +149,7 @@ class AstrochemClusterModel:
         print(f'# of points outside {tol*100}% error: {num_vals_outside_error} ({num_vals_outside_error/len(percent_error)}% of data)\n')
 
         plt.figure()
+        print(percent_error.max())
         plt.hist(percent_error, bins=np.arange(0, 1.01*percent_error.max(), 0.01*percent_error.max()))
         plt.yscale('log')
         plt.title(f'{title} ($N_s = {self.N_clusters}, N_t = {len(targets)}$)', fontsize=14)
