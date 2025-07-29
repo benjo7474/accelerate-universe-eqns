@@ -5,7 +5,7 @@
 
 from types import NoneType
 import numpy as np
-from nelson_langer_network import build_nelson_network
+from nelson_langer_network import solve_nelson_network, solve_nelson_network_with_sensitivities
 from recursive_clustering import \
     recursive_cluster_algorithm, flatten_cluster_centers, \
     flatten_cluster_centers_with_gradient
@@ -38,8 +38,8 @@ class AstrochemClusterModel:
         self.x0 = x0
         self.QoI = QoI
         self.time = time
-        self.p_to_q = lambda p: self._solve_nelson_network(p, x0, QoI, time)
-        self.p_to_q_and_dqdp = lambda p: self._solve_nelson_network_with_sensitivities(p, x0, QoI, time)
+        self.p_to_q = lambda p: solve_nelson_network(p, x0, QoI, time)
+        self.p_to_q_and_dqdp = lambda p: solve_nelson_network_with_sensitivities(p, x0, QoI, time)
         
         # if we need to do clustering, do this first.
         # this will come with ode solves
@@ -100,30 +100,6 @@ class AstrochemClusterModel:
             return self.KNN_model.predict(np.reshape(targets, (1,3)), k, unwrap_log=[True, True, False], disp_time=True)
         else:
             return self.KNN_model.predict(targets, k, unwrap_log=[True, True, False], disp_time=True)
-
-
-    # method takes in un-normalized parameters via numpy
-    def _solve_nelson_network(self, params_row: np.ndarray, x0: np.ndarray, QoI: int, time: float):
-        # undo the log
-        n_h = 10 ** params_row[0]
-        T = 10 ** params_row[1]
-        G0 = params_row[2]
-        # solve network
-        network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=False)
-        return network.solve_reaction_snapshot(x0, time, QoI)
-        
-    
-
-    # also takes in un-normalized parameters via numpy
-    def _solve_nelson_network_with_sensitivities(self, params_row: np.ndarray, x0: np.ndarray, QoI: int, time: float):
-        n_h = 10 ** params_row[0]
-        T = 10 ** params_row[1]
-        G0 = params_row[2]
-        network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=True)
-        _, yvec = network.solve_reaction([0, time], x0, t_eval=[time])
-        soln = yvec.flatten()
-        grad_indices = np.array([14, 28, 42]) + QoI
-        return soln[QoI], soln[grad_indices]
 
 
     ### --- TESTS --- ###
@@ -264,21 +240,18 @@ class AstrochemClusterModel:
 
 
     
-    def plot_point_cloud(self, train_points, test_points):
+    def plot_point_cloud(self, train_points):
 
         if self.model_trained == True:
 
             plt.figure()
             plt.scatter(train_points[:,0], train_points[:,1],
                         label=f'Training points using uniform sampling ($N={len(train_points)}$)', marker='o', alpha=0.3, c='red', s=20)
-            # plt.scatter(test_points[:,0], test_points[:,1],
-            #             label=f'Testing Data ($N={len(test_points)}$)', marker='o', alpha=0.3, c='green', s=20)
             plt.scatter(self.KNN_model.features[:,0], self.KNN_model.features[:,1],
                         label=f'Training points using adaptive clustering ($N={len(self.KNN_model.features)}$)', marker='.', c='blue', s=15)
-            plt.legend()
+            plt.legend(loc='upper right')
             plt.xlabel('$\\log_{10}(n_h)$', fontsize=12)
             plt.ylabel('$\\log_{10}(T)$', fontsize=12)
             plt.title('Uniform vs. Adaptive Sampling', fontsize=13)
             plt.show()
-
 

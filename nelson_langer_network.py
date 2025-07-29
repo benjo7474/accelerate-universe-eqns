@@ -214,3 +214,39 @@ def build_nelson_network(
         compute_sensitivities=compute_sensitivities
     )
 
+
+
+# this takes in LOG parameters and returns the quantity of interest.
+# In other words, it is the p to q map, but we are allowed to specify which quantity, ICs and time.
+def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: int, time: float):
+    # undo the log
+    n_h = 10 ** params_row[0]
+    T = 10 ** params_row[1]
+    G0 = params_row[2]
+    # solve network
+    network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=False)
+    return network.solve_reaction_snapshot(x0, time, QoI)
+    
+
+# Takes in log parameters and also computes the sensitivities
+def solve_nelson_network_with_sensitivities(params_row: np.ndarray, x0: np.ndarray, QoI: int, time: float):
+    n_h = 10 ** params_row[0]
+    T = 10 ** params_row[1]
+    G0 = params_row[2]
+    network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=True)
+    _, yvec = network.solve_reaction([0, time], x0, t_eval=[time])
+    soln = yvec.flatten()
+    grad_indices = np.array([14, 28, 42]) + QoI
+    return soln[QoI], soln[grad_indices]
+
+
+# Takes in log-parameters and returns a full evaluation at the time list given
+def solve_nelson_network_full(params_row: np.ndarray, x0: np.ndarray, QoI: int, time: np.ndarray):
+    # undo the log
+    n_h = 10 ** params_row[0]
+    T = 10 ** params_row[1]
+    G0 = params_row[2]
+    # solve network
+    network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=False)
+    _, yvec = network.solve_reaction([0, time[-1]], x0, t_eval=time)
+    return yvec[QoI]

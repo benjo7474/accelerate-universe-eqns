@@ -6,9 +6,7 @@
 # %%
 import numpy as np
 import pandas as pd
-from nelson_langer_network import build_nelson_network
 import time
-import torch
 from astrochem_clustering import AstrochemClusterModel
 import matplotlib.pyplot as plt
 
@@ -57,22 +55,6 @@ tf = years * secs_per_year
 
 QoI_indices = 9
 ode_solve_columns = [8, 9, 10, 11, 12]
-
-
-# this takes in LOG parameters and returns the quantity of interest.
-# In other words, it is the p to q map, but we are allowed to specify which quantity, ICs and time.
-def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: np.ndarray, time: float, teval=None):
-    n_h = 10**params_row[0]
-    T = 10**params_row[1]
-    G0 = params_row[2]
-    p = torch.tensor([n_h, T, G0])
-    network = build_nelson_network(params=p, compute_sensitivities=False)
-    tvec, yvec = network.solve_reaction([0, time], x0, teval)
-    if teval == None:
-        return yvec[QoI, -1]
-    else:
-        return yvec[QoI, :]
-
 
 
 # ---- FUNCTIONS TO LOAD DATA ---- #
@@ -224,10 +206,10 @@ def better_sampling_algorithm():
 def test_model(N_train=10000, N_test=5000, tf_index=2, k=1):
 
     # load data
-    p = np.load('data/input_p.npy') # this is in normal form
+    p = np.load('TACC_code/input_p_full.npy') # this is in normal form
     p[:,[0,1]] = np.log10(p[:,[0,1]])
-    q = np.load('data/output_q_CO.npy')
-    dqdp = np.load('data/output_dqdp_CO.npy')
+    q = np.load('TACC_code/output_q_CO_full.npy')
+    dqdp = np.load('TACC_code/output_dqdp_CO_full.npy')
 
     # 0.1K years = 0
     # 1K years = 1
@@ -243,16 +225,16 @@ def test_model(N_train=10000, N_test=5000, tf_index=2, k=1):
     test_inds = rand_inds[N_train:]
 
     surrogate = AstrochemClusterModel()
-    surrogate.train_model(p[train_inds], 5, x0, tf, use_gradient_boost=True,
+    surrogate.train_model(p[train_inds], 9, x0, tf, use_gradient_boost=True,
                           ode_solves=q_tf[train_inds], sensitivities=dqdp_tf[train_inds])
 
-    # percent_error, absolute_error = surrogate.test_accuracy(p[test_inds], q_tf[test_inds], k)
-    # bad_p_ind = np.argmax(percent_error)
-    # bad_p = p[test_inds][bad_p_ind]
+    percent_error, absolute_error = surrogate.test_accuracy(p[test_inds], q_tf[test_inds], k)
+    bad_p_ind = np.argmax(percent_error)
+    bad_p = p[test_inds][bad_p_ind]
     # good_p_ind = np.argmin(percent_error)
     # good_p = p[test_inds][good_p_ind]
-    # surrogate.convex_NN_plot(bad_p)
-    # surrogate.generate_slice_plots(bad_p)
+    surrogate.convex_NN_plot(bad_p)
+    surrogate.generate_slice_plots(bad_p)
 
     surrogate.plot_point_cloud(p[train_inds], p[test_inds])
     
@@ -261,18 +243,20 @@ def test_model(N_train=10000, N_test=5000, tf_index=2, k=1):
 
 def train_and_test_model(tf_index=2):
     
-    p = np.load('TACC_code/input_p_full.npy')
-    q = np.load('TACC_code/output_q_CO_full.npy')
-    dqdp = np.load('TACC_code/output_dqdp_CO_full.npy')
+    p = np.load('TACC_code/input_p_medium.npy') # not log
+    p[:,[0,1]] = np.log10(p[:,[0,1]])
+    q = np.load('TACC_code/output_q_CO_medium.npy')
+    dqdp = np.load('TACC_code/output_dqdp_CO_medium.npy')
 
     # randomize order
+    np.random.seed(1234)
     rand_inds = np.random.choice(np.arange(len(p)), len(p), replace=False)
     p = p[rand_inds]
     q = q[rand_inds]
     dqdp = dqdp[rand_inds]
 
     # uniformly sampled points
-    N_train = int(2e6)
+    N_train = 8000
     N_test = len(p) - N_train
     
     p_train = p[:N_train]
@@ -281,42 +265,48 @@ def train_and_test_model(tf_index=2):
     p_test = p[N_train:(N_train+N_test)]
     q_test = q[N_train:(N_train+N_test),tf_index]
 
-    # surrogate = AstrochemClusterModel()
-    # start = time.perf_counter()
+    surrogate = AstrochemClusterModel()
+    start = time.perf_counter()
 
     # Do clustering from scratch
     # surrogate.train_model(p_train, 9, x0, tf, error_tol=0.01,
-    #                       do_clustering=True, use_gradient_boost=True,
+    #                       do_clustering=True, use_gradient_boost=True, N=50,
     #                       ode_solves=q_train, sensitivities=dqdp_train)
     
     # Already clustered
-    # features = np.load('features.npy')
-    # labels = np.load('labels.npy')
-    # gradients = np.load('gradients.npy')
-    # surrogate.train_model(features, 9, x0, tf, do_clustering=False, use_gradient_boost=True,
-    #                       ode_solves=labels, sensitivities=gradients)
+    features = np.load('input_p_clustered_medium.npy')
+    labels = np.load('output_q_clustered_medium.npy')
+    gradients = np.load('output_dqdp_clustered_medium.npy')
+    surrogate.train_model(features, 9, x0, tf, do_clustering=False, use_gradient_boost=True,
+                          ode_solves=labels, sensitivities=gradients)
     
     # Do no clustering
-    surrogate2 = AstrochemClusterModel()
-    surrogate2.train_model(p_train, 9, x0, tf, do_clustering=False, use_gradient_boost=True,
-                           ode_solves=q_train, sensitivities=dqdp_train)
+    # surrogate2 = AstrochemClusterModel()
+    # surrogate2.train_model(p_train, 9, x0, tf, do_clustering=False, use_gradient_boost=True,
+    #                        ode_solves=q_train, sensitivities=dqdp_train)
 
-    # stop = time.perf_counter()
-    # print(f'Time to cluster: {stop-start:.2f} seconds')
+    stop = time.perf_counter()
+    print(f'Time to cluster: {stop-start:.2f} seconds')
 
-    # p_test[234] = p[123456] # get rid of shitty outlier
-    rel_err, _ = surrogate2.test_accuracy(p_test, q_test, 1)
+    rel_err, _ = surrogate.test_accuracy(p_test, q_test, 1)
     len(p_test)
     len(rel_err)
     # good_p_ind = np.argmin(rel_err)
     # good_p = p_test[good_p_ind]
     order = np.argsort(rel_err)
     print(p_test[order])
-    bad_p_ind = order[0]
+    bad_p_ind = order[-1]
     bad_p = p_test[bad_p_ind]
-    surrogate2.convex_NN_plot(bad_p)
-    surrogate2.generate_slice_plots(bad_p)
-    # surrogate.plot_point_cloud(p_train, p_test)
+    surrogate.convex_NN_plot(bad_p)
+    surrogate.generate_slice_plots(bad_p)
+
+    surrogate.plot_point_cloud(p_train)
+
+    # save the new source points
+    # np.save('input_p_clustered_medium.npy', surrogate.KNN_model.features)
+    # np.save('output_q_clustered_medium.npy', surrogate.KNN_model.labels)
+    # np.save('output_dqdp_clustered_medium.npy', surrogate.KNN_model.gradients)
+
 
 
 def compare_uniform_vs_adaptive_sampling(tf_index=2):
@@ -399,9 +389,9 @@ def compare_uniform_vs_adaptive_sampling(tf_index=2):
 
 def check_inds(N=20, QoI=9):
 
-    p = np.load('TACC_code/input_p_large.npy')
-    q = np.load('TACC_code/output_q.npy')
-    dqdp = np.load('TACC_code/output_dqdp.npy')
+    p = np.load('TACC_code/input_p_medium.npy')
+    q = np.load('TACC_code/output_q_CO_medium.npy')
+    dqdp = np.load('TACC_code/output_dqdp_CO_medium.npy')
     print(p.shape)
     print(q.shape)
     print(dqdp.shape)
@@ -502,10 +492,10 @@ if __name__ == '__main__':
     # surrogate = train_and_test_model()
     # save_surrogate(surrogate, 'data/grad_surrogate.pkl')
     # surrogate: AstrochemClusterModel = load_surrogate('data/grad_surrogate.pkl')
-    # test_model(N_train=30000, N_test=5000, k=1, tf_index=2)
+    # test_model(N_train=200000, N_test=10000, k=1, tf_index=2)
     # compare_uniform_vs_adaptive_sampling()
-    # train_and_test_model()
-    check_inds()
+    train_and_test_model()
+    # check_inds()
 
 
 # # %%

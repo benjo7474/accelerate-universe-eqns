@@ -87,34 +87,42 @@ def recursive_cluster_algorithm(
         # error = np.max(dvec) / qc
 
         # Compute error by taking largest distances away and averaging errors
-        distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster, axis=1)
-        largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
-        dvec = np.empty(shape=ss_new)
-        for i, row in enumerate(params_in_cluster[largest_row_indices]):
-            # compute true value (save in qi)
-            if type(ode_solves_in_cluster) == NoneType:
+        if type(ode_solves_in_cluster) == NoneType:
+
+            # ODE solves not defined. We need to loop through and solve
+            distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster, axis=1)
+            largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
+            qivec = np.empty(shape=ss_new)
+            for i, row in enumerate(params_in_cluster[largest_row_indices]):
+                # compute true value (save in qi)
                 if use_gradient == False:
-                    qi = eval_function(row)
+                    qivec[i] = eval_function(row)
                 elif use_gradient == True:
-                    qi, _ = eval_function(row)
+                    qivec[i], _ = eval_function(row)
+
+        else:
+
+            # ODE solves are defined. No need to loop through
+            # Also avoid the sample size and use every single point (we get away with it for free)
+            qivec = ode_solves_in_cluster
+
+        # using true value, compute error from qc
+        if use_gradient == False:
+            dvec = np.abs(qc-qivec) # no gradient (0th order)
+        elif use_gradient == True:
+            # make sure we compute in euclidean, non-log scaled distance
+            # use unpack_log to know which variables to do
+            if type(ode_solves_in_cluster) == NoneType:
+                params_nonlog = np.copy(params_in_cluster[largest_row_indices])
             else:
-                qi = ode_solves_in_cluster[largest_row_indices[i]]
-                
-            # using true value, compute error from qc
-            if use_gradient == False:
-                dvec[i] = np.abs(qc-qi) # no gradient (0th order)
-            elif use_gradient == True:
-                # error is given by gradient
-                # make sure we compute in euclidean, non-log scaled distance
-                # use unpack_log to know which variables to do
-                row_nonlog = np.copy(row)
-                qc_nonlog = np.copy(centroid_params)
-                for l, val in enumerate(unpack_log):
-                    if val == True:
-                        row_nonlog[l] = 10 ** row_nonlog[l]
-                        qc_nonlog[l] = 10 ** qc_nonlog[l]
-                distance = row_nonlog - qc_nonlog
-                dvec[i] = np.abs(qi - (qc + np.dot(dqdpc, distance)))
+                params_nonlog = np.copy(params_in_cluster)
+            centroid_nonlog = np.copy(centroid_params)
+            for l, val in enumerate(unpack_log):
+                if val == True:
+                    params_nonlog[:,l] = 10 ** params_nonlog[:,l]
+                    centroid_nonlog[l] = 10 ** centroid_nonlog[l]
+            distance = params_nonlog - centroid_nonlog
+            dvec = np.abs(qivec - (qc + np.sum(dqdpc * distance, axis=1)))
 
         error = np.max(dvec / qc) # relative error
 
@@ -185,37 +193,44 @@ def _recursive_cluster_algorithm_helper(
 
 
     # Compute error by taking largest distances away and averaging errors
-    # can make this block wayyyy faster using either faiss or matrices?
-    distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_0, axis=1)
-    largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
-    dvec = np.empty(ss_new)
-    for i, row in enumerate(params_in_cluster_0[largest_row_indices]):
-        # compute true value
-        if type(ode_solves_in_cluster_0) == NoneType:
+    if type(ode_solves_in_cluster_0) == NoneType:
+
+        # ODE solves not defined. We need to loop through and solve
+        distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_0, axis=1)
+        largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
+        qivec = np.empty(shape=ss_new)
+        for i, row in enumerate(params_in_cluster_0[largest_row_indices]):
+            # compute true value (save in qi)
             if use_gradient == False:
-                qi = eval_function(row)
+                qivec[i] = eval_function(row)
             elif use_gradient == True:
-                qi, _ = eval_function(row)
+                qivec[i], _ = eval_function(row)
+
+    else:
+
+        # ODE solves are defined. No need to loop through
+        # Also avoid the sample size and use every single point (we get away with it for free)
+        qivec = ode_solves_in_cluster_0
+
+    # using true value, compute error from qc
+    if use_gradient == False:
+        dvec = np.abs(qc-qivec) # no gradient (0th order)
+    elif use_gradient == True:
+        # make sure we compute in euclidean, non-log scaled distance
+        # use unpack_log to know which variables to do
+        if type(ode_solves_in_cluster_0) == NoneType:
+            params_nonlog = np.copy(params_in_cluster_0[largest_row_indices])
         else:
-            qi = ode_solves_in_cluster_0[largest_row_indices[i]]
+            params_nonlog = np.copy(params_in_cluster_0)
+        centroid_nonlog = np.copy(centroid_params)
+        for l, val in enumerate(unpack_log):
+            if val == True:
+                params_nonlog[:,l] = 10 ** params_nonlog[:,l]
+                centroid_nonlog[l] = 10 ** centroid_nonlog[l]
+        distance = params_nonlog - centroid_nonlog
+        dvec = np.abs(qivec - (qc + np.sum(dqdpc * distance, axis=1)))
 
-        # using true value, compute error from qc
-        if use_gradient == False:
-            dvec[i] = np.abs(qc-qi)
-        elif use_gradient == True:
-            # error is given by gradient
-            # make sure we compute in euclidean, non-log scaled distance
-            # use unpack_log to know which variables to do
-            row_nonlog = np.copy(row)
-            qc_nonlog = np.copy(centroid_params)
-            for l, val in enumerate(unpack_log):
-                if val == True:
-                    row_nonlog[l] = 10 ** row_nonlog[l]
-                    qc_nonlog[l] = 10 ** qc_nonlog[l]
-            distance = row_nonlog - qc_nonlog
-            dvec[i] = np.abs(qi - (qc + np.dot(dqdpc, distance)))
-
-    error = np.max(dvec / qc)
+    error = np.max(dvec / qc) # relative error
 
     if len(params_in_cluster_0) == 1 or error < error_tol:
         left = Cluster(k, centroid_params, qc, dqdpc)
@@ -252,36 +267,48 @@ def _recursive_cluster_algorithm_helper(
 
     # Compute error by taking largest distances away and averaging errors
     # can make this block wayyyy faster using either faiss or matrices
-    distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_1, axis=1)
-    largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
-    dvec = np.empty(ss_new)
-    for i, row in enumerate(params_in_cluster_1[largest_row_indices]):
-        # compute true value
-        if type(ode_solves_in_cluster_1) == NoneType:
+
+
+    # Compute error by taking largest distances away and averaging errors
+    if type(ode_solves_in_cluster_1) == NoneType:
+
+        # ODE solves not defined. We need to loop through and solve
+        distances_from_cluster = np.linalg.norm(centroid_params - params_in_cluster_1, axis=1)
+        largest_row_indices = np.argpartition(distances_from_cluster, -ss_new)[-ss_new:]
+        qivec = np.empty(shape=ss_new)
+        for i, row in enumerate(params_in_cluster_1[largest_row_indices]):
+            # compute true value (save in qi)
             if use_gradient == False:
-                qi = eval_function(row)
+                qivec[i] = eval_function(row)
             elif use_gradient == True:
-                qi, _ = eval_function(row)
+                qivec[i], _ = eval_function(row)
+
+    else:
+
+        # ODE solves are defined. No need to loop through
+        # Also avoid the sample size and use every single point (we get away with it for free)
+        qivec = ode_solves_in_cluster_1
+
+    # using true value, compute error from qc
+    if use_gradient == False:
+        dvec = np.abs(qc-qivec) # no gradient (0th order)
+    elif use_gradient == True:
+        # make sure we compute in euclidean, non-log scaled distance
+        # use unpack_log to know which variables to do
+        if type(ode_solves_in_cluster_1) == NoneType:
+            params_nonlog = np.copy(params_in_cluster_1[largest_row_indices])
         else:
-            qi = ode_solves_in_cluster_1[largest_row_indices[i]]
+            params_nonlog = np.copy(params_in_cluster_1)
+        centroid_nonlog = np.copy(centroid_params)
+        for l, val in enumerate(unpack_log):
+            if val == True:
+                params_nonlog[:,l] = 10 ** params_nonlog[:,l]
+                centroid_nonlog[l] = 10 ** centroid_nonlog[l]
+        distance = params_nonlog - centroid_nonlog
+        dvec = np.abs(qivec - (qc + np.sum(dqdpc * distance, axis=1)))
 
-        # compare error from qc
-        if use_gradient == False:
-            dvec[i] = np.abs(qc-qi)
-        elif use_gradient == True:
-            # error is given by gradient
-            # make sure we compute in euclidean, non-log scaled distance
-            # use unpack_log to know which variables to do
-            row_nonlog = np.copy(row)
-            qc_nonlog = np.copy(centroid_params)
-            for l, val in enumerate(unpack_log):
-                if val == True:
-                    row_nonlog[l] = 10 ** row_nonlog[l]
-                    qc_nonlog[l] = 10 ** qc_nonlog[l]
-            distance = row_nonlog - qc_nonlog
-            dvec[i] = np.abs(qi - (qc + np.dot(dqdpc, distance)))
+    error = np.max(dvec / qc) # relative error
 
-    error = np.max(dvec / qc)
 
     if len(params_in_cluster_1) == 1 or error < error_tol:
         right = Cluster(k, centroid_params, qc, dqdpc)
