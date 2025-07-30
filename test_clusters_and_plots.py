@@ -330,6 +330,8 @@ def convergence_study(
         # for each tolerance,
         for tol in rel_errs:
             
+            start_time = time.perf_counter()
+
             # first for non-gradient model
             no_gradient_model = AstrochemClusterModel()
             no_gradient_model.train_model(
@@ -350,6 +352,9 @@ def convergence_study(
                 pdf.savefig(fig_g_rel)
                 plt.close(fig_g_rel)
                 plt.close(fig_g_abs)
+
+            mid_time = time.perf_counter()
+            print(f'Time for no gradient, tol={tol}, attempt {i}: {mid_time-start_time}')
 
             # then for gradient model
             gradient_model = AstrochemClusterModel()
@@ -374,6 +379,9 @@ def convergence_study(
                 pdf.savefig(fig_ng_rel)
                 plt.close(fig_ng_rel)
                 plt.close(fig_ng_abs)
+
+            end_time = time.perf_counter()
+            print(f'Time for no gradient, tol={tol}, attempt {i}: {end_time-mid_time}')
 
 
 
