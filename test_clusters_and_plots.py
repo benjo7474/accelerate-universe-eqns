@@ -9,6 +9,7 @@ import pandas as pd
 import time
 from astrochem_clustering import AstrochemClusterModel
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 # Load parameters
 
@@ -53,22 +54,11 @@ secs_per_year = 3600*24*365
 years = 10000
 tf = years * secs_per_year
 
-QoI_indices = 9
+QoI = 9
 ode_solve_columns = [8, 9, 10, 11, 12]
 
 
 # ---- FUNCTIONS TO LOAD DATA ---- #
-
-
-# Load small dataset
-def load_small_dataset():
-    foo = np.load('data/small_dataset.npy')
-    small_dataset = pd.DataFrame(data=foo, columns=['$\log(n_h)$', '$\log(T)$', '$G_0$'])
-    np.random.seed(1234)
-    msk = np.random.rand(len(small_dataset)) > 0.2
-    train = small_dataset[msk]
-    test = small_dataset[~msk]
-    return train, test
 
 
 # Load medium dataset (with ode solves)
@@ -177,28 +167,6 @@ def load_full_dataset_with_ode_solves():
 
 
 
-# Better sampling algorithm (as suggested by George)
-# Run FAISS for the entire 2M dataset
-# INCOMPLETE;
-def better_sampling_algorithm():
-    params = load_parameters()
-    import faiss
-    faiss_index_params = faiss.IndexFlatL2(3)
-    faiss_index_params.add(params.to_numpy())
-    D, I = faiss_index_params.search(params.to_numpy(), 20) # this takes a longggg time
-    # I is saved in data/tracer_param_data_nearest_ind.npy
-
-    from numba import jit
-    @jit(nopython=True)
-    def count_entries(I):
-        occurences = np.zeros(shape=len(I))
-        for ind, x in np.ndenumerate(I):
-            occurences[x] += 1
-        return np.argsort()
-
-    count_entries(I[:100,:])
-
-
 
 # ---- FUNCTIONS TO BUILD CLUSTER MODELS ---- #
 
@@ -225,10 +193,13 @@ def test_model(N_train=10000, N_test=5000, tf_index=2, k=1):
     test_inds = rand_inds[N_train:]
 
     surrogate = AstrochemClusterModel()
-    surrogate.train_model(p[train_inds], 9, x0, tf, use_gradient_boost=True,
-                          ode_solves=q_tf[train_inds], sensitivities=dqdp_tf[train_inds])
+    surrogate.train_model(p[train_inds], 9, x0, tf,
+                          use_gradient_boost=True,
+                          do_clustering=False,
+                          ode_solves=q_tf[train_inds],
+                          sensitivities=dqdp_tf[train_inds])
 
-    percent_error, absolute_error = surrogate.test_accuracy(p[test_inds], q_tf[test_inds], k)
+    percent_error, absolute_error, _, _ = surrogate.test_accuracy(p[test_inds], q_tf[test_inds], k)
     bad_p_ind = np.argmax(percent_error)
     bad_p = p[test_inds][bad_p_ind]
     # good_p_ind = np.argmin(percent_error)
@@ -288,7 +259,7 @@ def train_and_test_model(tf_index=2):
     stop = time.perf_counter()
     print(f'Time to cluster: {stop-start:.2f} seconds')
 
-    rel_err, _ = surrogate.test_accuracy(p_test, q_test, 1)
+    rel_err, _, _, _ = surrogate.test_accuracy(p_test, q_test, 1)
     len(p_test)
     len(rel_err)
     # good_p_ind = np.argmin(rel_err)
@@ -306,6 +277,105 @@ def train_and_test_model(tf_index=2):
     # np.save('input_p_clustered_medium.npy', surrogate.KNN_model.features)
     # np.save('output_q_clustered_medium.npy', surrogate.KNN_model.labels)
     # np.save('output_dqdp_clustered_medium.npy', surrogate.KNN_model.gradients)
+
+
+
+
+# K times: pick 80% of dataset as training and 20% as testing
+# for each set of training data, run each tol, for both grad and w/o grad
+# save N_clusters, error statistics (max, mean, median, average, histogram) in table
+# put histograms in PDF with well-labeled titles and axes
+def convergence_study(
+    input_name = 'TACC_code/input_p_full.npy',
+    output_name = 'TACC_code/output_q_CO_full.npy',
+    grads_name = 'TACC_code/output_dqdp_CO_full.npy',
+    N_points = 1000000,
+    rel_errs = [0.2, 0.1, 0.05, 0.01, 0.001],
+    K = 5,
+    N_init = 10,
+    pdf_name = 'convergence_study_plots.pdf'
+):
+    
+    # load data
+    p = np.load(input_name) # not log
+    p[:,[0,1]] = np.log10(p[:,[0,1]])
+    q = np.load(output_name)
+    dqdp = np.load(grads_name)
+
+    # filter
+    randinds = np.random.choice(np.arange(len(p)), N_points, replace=False)
+    p = p[randinds]
+    q = q[randinds]
+    dqdp = dqdp[randinds]
+
+    # pick only one time horizon (10K years for now)
+    tf_index = 2
+    q_tf = q[:,tf_index]
+    dqdp_tf = dqdp[:,:,tf_index]
+
+    # loop over K times and pick training and testing data split
+    for i in range(K):
+
+        N_train = 8 * len(p) // 10
+        sample_inds = np.arange(len(p))
+        np.random.shuffle(sample_inds)
+
+        p_train = p[sample_inds[:N_train]]
+        q_train = q_tf[sample_inds[:N_train]]
+        dqdp_train = dqdp_tf[sample_inds[:N_train]]
+        p_test = p[sample_inds[N_train:]]
+        q_test = q_tf[sample_inds[N_train:]]
+        dqdp_test = dqdp_tf[sample_inds[N_train:]]
+
+        # for each tolerance,
+        for tol in rel_errs:
+            
+            # first for non-gradient model
+            no_gradient_model = AstrochemClusterModel()
+            no_gradient_model.train_model(
+                p_train, QoI, x0, tf,
+                N = N_init,
+                do_clustering = True,
+                error_tol = tol,
+                use_gradient_boost = False,
+                ode_solves = q_train,
+            )
+            N_ng = no_gradient_model.N_clusters
+
+            _, _, fig_g_rel, fig_g_abs = no_gradient_model.test_accuracy(p_test, q_test, 1,
+                    f'Relative Errors (No Gradient), $tol={tol}$, $N={N_ng}$',
+                    print_stats=False, disp_figs=False)
+            # save to pdf
+            with PdfPages(pdf_name) as pdf:
+                pdf.savefig(fig_g_rel)
+                plt.close(fig_g_rel)
+                plt.close(fig_g_abs)
+
+            # then for gradient model
+            gradient_model = AstrochemClusterModel()
+            gradient_model.train_model(
+                p_train, QoI, x0, tf,
+                N = N_init,
+                do_clustering = True,
+                error_tol = tol,
+                use_gradient_boost = True,
+                ode_solves = q_train,
+                sensitivities = dqdp_train
+            )
+            N_g = gradient_model.N_clusters
+
+            # TODO statistics
+            _, _, fig_ng_rel, fig_ng_abs = gradient_model.test_accuracy(p_test, q_test, 1,
+                    f'Relative Errors (With Gradient), $tol={tol}$, $N={N_g}$',
+                    print_stats=False, disp_figs=False)
+            
+            # save to pdf
+            with PdfPages(pdf_name) as pdf:
+                pdf.savefig(fig_ng_rel)
+                plt.close(fig_ng_rel)
+                plt.close(fig_ng_abs)
+
+
 
 
 
@@ -387,7 +457,7 @@ def compare_uniform_vs_adaptive_sampling(tf_index=2):
     surrogate_adaptive.generate_slice_plots(bad_p)
 
 
-def check_inds(N=20, QoI=9):
+def check_ode_solves_from_TACC(N=20, QoI=9):
 
     p = np.load('TACC_code/input_p_medium.npy')
     q = np.load('TACC_code/output_q_CO_medium.npy')
@@ -489,13 +559,10 @@ def datamatrix_to_pandas(datamat):
 
 
 if __name__ == '__main__':
-    # surrogate = train_and_test_model()
-    # save_surrogate(surrogate, 'data/grad_surrogate.pkl')
-    # surrogate: AstrochemClusterModel = load_surrogate('data/grad_surrogate.pkl')
     # test_model(N_train=200000, N_test=10000, k=1, tf_index=2)
     # compare_uniform_vs_adaptive_sampling()
-    train_and_test_model()
-    # check_inds()
+    # train_and_test_model()
+    convergence_study()
 
 
 # # %%

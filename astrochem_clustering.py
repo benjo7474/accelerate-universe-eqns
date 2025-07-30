@@ -106,7 +106,7 @@ class AstrochemClusterModel:
 
     # given a matrix of features and a list of true values, use above function to predict,
     # followed by comparing the accuracy to true_values and displaying error statistics.
-    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray, k: int = 1, title='Relative Error'):
+    def test_accuracy(self, targets: np.ndarray, true_values: np.ndarray, k: int = 1, title='Relative Error', print_stats=True, disp_figs=True):
 
         # TODO check if length of targets and true_values matches
         # TODO check if length of each feature vector matches length of training vectors
@@ -115,43 +115,53 @@ class AstrochemClusterModel:
         absolute_error = np.abs(predicted_values - true_values)
         percent_error = absolute_error / np.abs(true_values)
 
-        print('PERCENT ERRORS')
-        print(f'Mean: {np.mean(percent_error)}')
-        print(f'Median: {np.median(percent_error)}')
-        print(f'Max: {np.max(percent_error)}')
-        print(f'STD: {np.std(percent_error)}')
-        tol = 0.01
-        num_vals_outside_error = (percent_error > tol).sum()
-        print(f'# of points outside {tol*100}% error: {num_vals_outside_error} ({num_vals_outside_error/len(percent_error)}% of data)\n')
+        if print_stats == True:
+            print('PERCENT ERRORS')
+            print(f'Mean: {np.mean(percent_error)}')
+            print(f'Median: {np.median(percent_error)}')
+            print(f'Max: {np.max(percent_error)}')
+            print(f'STD: {np.std(percent_error)}')
+            tol = 0.01
+            num_vals_outside_error = (percent_error > tol).sum()
+            print(f'# of points outside {tol*100}% error: {num_vals_outside_error} ({num_vals_outside_error/len(percent_error)}% of data)\n')
 
-        plt.figure()
-        print(percent_error.max())
-        plt.hist(percent_error, bins=np.arange(0, 1.01*percent_error.max(), 0.01*percent_error.max()))
-        plt.yscale('log')
-        plt.title(f'{title} ($N_s = {self.N_clusters}, N_t = {len(targets)}$)', fontsize=14)
-        plt.xlabel('Relative Error', fontsize=12)
-        plt.ylabel('# Points', fontsize=12)
-        plt.text(1.01*percent_error.max(), 2e3,
-                f'Mean: {np.mean(percent_error):.3e}\n\
+            print('ABSOLUTE ERRORS')
+            print(f'Mean: {np.mean(absolute_error)}')
+            print(f'Median: {np.median(absolute_error)}')
+            print(f'Max: {np.max(absolute_error)}')
+            print(f'STD: {np.std(absolute_error)}\n')
+
+
+        fig_rel, ax = plt.subplots()
+        ax.hist(percent_error, bins=np.arange(0, 1.01*percent_error.max(), 0.01*percent_error.max()))
+        ax.set_yscale('log')
+        ax.set_title(title, fontsize=14)
+        ax.set_xlabel('Relative Error', fontsize=12)
+        ax.set_ylabel('# Points', fontsize=12)
+        ax.text(0.95,0.95,
+                f'# Targets: {len(targets)}\n\
+                Mean: {np.mean(percent_error):.3e}\n\
                 Median: {np.median(percent_error):.3e}\n\
                 Max: {np.max(percent_error):.3e}\n\
                 STD: {np.std(percent_error):.3e}',
-                fontsize=10, horizontalalignment='right')
-        plt.show()
+                fontsize=10,
+                verticalalignment='top',
+                horizontalalignment='right',
+                transform = ax.transAxes)
+        
+        if disp_figs == True:
+            plt.show()
 
-        print('ABSOLUTE ERRORS')
-        print(f'Mean: {np.mean(absolute_error)}')
-        print(f'Median: {np.median(absolute_error)}')
-        print(f'Max: {np.max(absolute_error)}')
-        print(f'STD: {np.std(absolute_error)}\n')
+        fig_abs, ax = plt.subplots()
+        ax.hist(np.log10(absolute_error))
+        ax.set_yscale('log')
+        ax.set_title('Absolute Error xCO (with gradient)')
+        
+        if disp_figs == True:
+            plt.show()
 
-        plt.figure()
-        plt.hist(np.log10(absolute_error))
-        plt.yscale('log')
-        plt.title('Absolute Error xCO (with gradient)')
-        plt.show()
+        return percent_error, absolute_error, fig_rel, fig_abs
 
-        return percent_error, absolute_error
 
     
     # plot the convex combination from the closest source to the target

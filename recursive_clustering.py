@@ -76,6 +76,7 @@ def recursive_cluster_algorithm(
             qc, dqdpc = eval_function(centroid_params)
         else:
             qc = eval_function(centroid_params)
+            dqdpc = None
         
 
         # Compute error via max_{j=1,...,ss}(q_c - q_j) / q_c
@@ -190,6 +191,7 @@ def _recursive_cluster_algorithm_helper(
         qc, dqdpc = eval_function(centroid_params)
     else:
         qc = eval_function(centroid_params)
+        dqdpc = None
 
 
     # Compute error by taking largest distances away and averaging errors
@@ -262,6 +264,7 @@ def _recursive_cluster_algorithm_helper(
     centroid_params = centroids[1]
     if use_gradient == False:
         qc = eval_function(centroid_params)
+        dqdpc = None
     elif use_gradient == True:
         qc, dqdpc = eval_function(centroid_params)
 
