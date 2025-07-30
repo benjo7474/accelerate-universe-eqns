@@ -286,9 +286,9 @@ def train_and_test_model(tf_index=2):
 # save N_clusters, error statistics (max, mean, median, average, histogram) in table
 # put histograms in PDF with well-labeled titles and axes
 def convergence_study(
-    input_name = 'TACC_code/input_p_full.npy',
-    output_name = 'TACC_code/output_q_CO_full.npy',
-    grads_name = 'TACC_code/output_dqdp_CO_full.npy',
+    input_name = 'data/input_p_full.npy',
+    output_name = 'data/output_q_CO_full.npy',
+    grads_name = 'data/output_dqdp_CO_full.npy',
     N_points = 1000000,
     rel_errs = [0.2, 0.1, 0.05, 0.01, 0.001],
     K = 5,
