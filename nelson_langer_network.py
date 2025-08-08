@@ -184,7 +184,8 @@ def build_nelson_network(
         params=np.array([611, 10, 1.7]),
         Av: float = 2,
         shield: float = 1,
-        compute_sensitivities=False
+        compute_sensitivities=False,
+        QoIs_to_vary = np.array([])
     ):
 
     return ReactionNetwork(14, params,
@@ -211,14 +212,20 @@ def build_nelson_network(
         Reaction([8], [7], lambda p: 5e-10*p[2]*np.exp(-1.7*Av)),
         Reaction([13], [12,2], lambda p: 2e-10*p[2]*np.exp(-1.9*Av)),
         Reaction([10], [9], lambda p: 1.5e-10*p[2]*np.exp(-2.5*Av)),
-        compute_sensitivities=compute_sensitivities
+        compute_sensitivities = compute_sensitivities,
+        QoIs_to_vary = QoIs_to_vary
     )
 
 
 
 # this takes in LOG parameters and returns the quantity of interest.
 # In other words, it is the p to q map, but we are allowed to specify which quantity, ICs and time.
-def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: int, time: float):
+def solve_nelson_network(
+        params_row: np.ndarray,
+        x0: np.ndarray,
+        QoI: int,
+        time: float
+    ):
     # undo the log
     n_h = 10 ** params_row[0]
     T = 10 ** params_row[1]
@@ -226,17 +233,25 @@ def solve_nelson_network(params_row: np.ndarray, x0: np.ndarray, QoI: int, time:
     # solve network
     network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=False)
     return network.solve_reaction_snapshot(x0, time, QoI)
-    
 
 # Takes in log parameters and also computes the sensitivities
-def solve_nelson_network_with_sensitivities(params_row: np.ndarray, x0: np.ndarray, QoI: int, time: float):
+def solve_nelson_network_with_sensitivities(
+        params_row: np.ndarray,
+        x0: np.ndarray,
+        QoI: int,
+        time: float,
+        QoIs_to_vary: np.ndarray = np.array([]), # included for sensitivity calculations
+    ):
     n_h = 10 ** params_row[0]
     T = 10 ** params_row[1]
     G0 = params_row[2]
-    network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=True)
+    network = build_nelson_network(
+        params=np.array([n_h, T, G0]),
+        compute_sensitivities=True,
+        QoIs_to_vary=QoIs_to_vary)
     _, yvec = network.solve_reaction([0, time], x0, t_eval=[time])
     soln = yvec.flatten()
-    grad_indices = np.array([14, 28, 42]) + QoI
+    grad_indices = 14 * (np.arange(3+len(QoIs_to_vary)) + 1) + QoI
     return soln[QoI], soln[grad_indices]
 
 
@@ -250,3 +265,4 @@ def solve_nelson_network_full(params_row: np.ndarray, x0: np.ndarray, QoI: int, 
     network = build_nelson_network(params=np.array([n_h, T, G0]), compute_sensitivities=False)
     _, yvec = network.solve_reaction([0, time[-1]], x0, t_eval=time)
     return yvec[QoI]
+

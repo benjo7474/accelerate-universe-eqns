@@ -1,4 +1,4 @@
-# %%
+
 import numpy as np
 from nelson_langer_network import build_nelson_network
 import torch
@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from test_clusters_and_plots import load_parameters
 
 
-# %% check via finite differences if we get convergence
+# check via finite differences if we get convergence
 # only check individual entries since different scales messes with rounding errors
 # major work in progress; lots of numerical instability
 
@@ -121,7 +121,7 @@ def get_sample_of_parameters(N):
 
 
 
-# %% Now include random sampling
+# Now include random sampling
 # take 100 random parameters, run error for each and plot
 def measure_FD_error_over_sample(N, tf_years):
     sample = get_sample_of_parameters(N)
@@ -143,13 +143,56 @@ def find_N_largest_indices(arr, N):
     return sorted_indices
 
 
-# %%
-# x0 = np.array([0.5, 9.059e-9, 2e-4, 0.1, 7.866e-7, 0.0, 0.0, 0.0004, 0.0, 0.0, 0.0, 0.0002, 2.0e-7, 2.0e-7])
-# secs_per_year = 3600*24*365
-# years = 10000
-# tf = years * secs_per_year
 
-# NL = build_nelson_network(compute_sensitivities=True)
-# t, y = NL.solve_reaction([0, tf], x0)
+if __name__ == '__main__':
 
-# %%
+    # x0 = np.array([0.5, 9.059e-9, 2e-4, 0.1, 7.866e-7, 0.0, 0.0, 0.0004, 0.0, 0.0, 0.0, 0.0002, 2.0e-7, 2.0e-7])
+    x0 = np.array([
+        0.5,      # H_2     0
+        0.25,     # H_3^+   1
+        5.324e-6, # e       2
+        0.1,      # He      3
+        7.866e-7, # He^+    4
+        1.77e-4,  # C       5
+        0.0,      # CH_x    6
+        0.0004,   # O       7
+        2e-9,      # OH_x    8
+        2e-5,      # CO      9
+        0.0,      # HCO^+   10
+        1e-10,    # C^+     11
+        4.0e-12,   # M^+     12
+        2.0e-7,   # M       13
+    ])
+
+    secs_per_year = 3600*24*365
+    years = 10000
+    tf = years * secs_per_year
+
+    QoI_to_vary = 5
+    pert_size = 1e-10
+
+    # perturbation
+    x0_pert = np.zeros(len(x0))
+    x0_pert[QoI_to_vary] = pert_size
+
+    # solve plus perturbation
+    NL = build_nelson_network(compute_sensitivities=False)
+    _, y_plus = NL.solve_reaction([0, tf], x0 + x0_pert, [tf])
+    y_plus = y_plus.flatten()
+
+    # solve no perturbation
+    _, y_minus = NL.solve_reaction([0, tf], x0 - x0_pert, [tf])
+    y_minus = y_minus.flatten()
+    
+    # finite difference
+    dy_dCO_fd = (y_plus - y_minus) / (2*pert_size)
+
+    # derivative using sensitivities
+    NL = build_nelson_network(compute_sensitivities=True, QoIs_to_vary=np.array([QoI_to_vary]))
+    _, y_full = NL.solve_reaction([0, tf], x0, [tf])
+    dy_dCO_sens = y_full.flatten()[56:]
+
+    print(dy_dCO_fd)
+    print(dy_dCO_sens)
+    print((dy_dCO_fd - dy_dCO_sens) / dy_dCO_fd)
+

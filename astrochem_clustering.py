@@ -20,11 +20,14 @@ class AstrochemClusterModel:
         self.model_trained = False
 
 
-
     def train_model(self,
         training_data: np.ndarray, # columns are log(n_h), log(T), G0 (not normalized)
+        # further columns are the initial conditions corresponding to QoIs_to_vary
         QoI: int,
-        x0: np.ndarray,
+        x0: np.ndarray, # this is no longer fixed (some of the entries)
+        QoIs_to_vary: np.ndarray, # an array of the species in x0 that are not fixed
+        # for example if we vary only [CO] then QoIs_to_vary = np.array([9])
+        # will include these in sensitivity calculation
         time: float,
         N: int = 10,
         ss: int = 10,
@@ -37,10 +40,13 @@ class AstrochemClusterModel:
         
         self.x0 = x0
         self.QoI = QoI
+        self.QoIs_to_vary = QoIs_to_vary
         self.time = time
-        self.p_to_q = lambda p: solve_nelson_network(p, x0, QoI, time)
-        self.p_to_q_and_dqdp = lambda p: solve_nelson_network_with_sensitivities(p, x0, QoI, time)
-        
+        # self.p_to_q = lambda p: solve_nelson_network(p, x0, QoI, time) # this needs to take x0 as a variable instead of fixed
+        self.p_to_q = lambda p: self._solve_nelson_network(p)
+        # self.p_to_q_and_dqdp = lambda p: solve_nelson_network_with_sensitivities(p, x0, QoI, time) # same here
+        self.p_to_q_and_dqdp = lambda p: self._solve_nelson_network_with_sensitivities(p)
+
         # if we need to do clustering, do this first.
         # this will come with ode solves
         if do_clustering == True:
@@ -265,3 +271,21 @@ class AstrochemClusterModel:
             plt.title('Uniform vs. Adaptive Sampling', fontsize=13)
             plt.show()
 
+
+    # Takes in a vector p that contains BOTH:
+    #   - The physical parameters (log(n_h), log(T), G0)
+    #   - Initial conditions for every entry afterwards.
+    # To know what initial conditions these entries correspond to,
+    # we use the QoIs_to_vary variable.
+    def _solve_nelson_network(self, p):
+        x0 = self.x0.copy()
+        x0[self.QoIs_to_vary] = p[3:]
+        return solve_nelson_network(p[0:3], x0, self.QoI, self.time)
+    
+    # Same here but with sensitivities
+    # The function solve_nelson_network_with_sensitivities needs to be changed to include
+    # sensitivities of initial conditions
+    def _solve_nelson_network_with_sensitivities(self, p):
+        x0 = self.x0.copy()
+        x0[self.QoIs_to_vary] = p[3:]
+        return solve_nelson_network_with_sensitivities(p[0:3], x0, self.QoI, self.time, self.QoIs_to_vary)

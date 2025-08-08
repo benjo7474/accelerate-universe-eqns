@@ -98,13 +98,22 @@ class ReactionNetwork:
     # Holds a whole bunch of reactions
 
     # Constructor: takes in a bunch of reactions
-    # IMPORTANT ASSUMPTION: assumes first parameter in params vec is the normalizing density (i.e. n_h)
-    # This assumption likely needs to be examined
-    def __init__(self, num_species, params, *reactions: Reaction, compute_sensitivities=False):
+    # Assumes first parameter in params vec is the normalizing density (log(n_h))
+    # Reactions rate functions will take params as an input
+    # As for which initial conditions these represent, this is encoded in QoIs_to_vary.
+    def __init__(self,
+        num_species,
+        params,
+        *reactions: Reaction,
+        compute_sensitivities = False,
+        QoIs_to_vary = np.array([])
+    ):
+
         self.reactions = reactions
         self.num_species = num_species
         self.params = params
         self.compute_sensitivities = compute_sensitivities
+        self.QoIs_to_vary = QoIs_to_vary
         self._build_tensors(params) # routine that saves Q and L, and if necessary, dQ/dp and dL/dp
 
 
@@ -184,7 +193,7 @@ class ReactionNetwork:
     def jacobian_sensitivities_torch(self, x: torch.tensor) -> torch.tensor:
         # takes vector from torch, returns torch (sparse)
         jac_block = self.jacobian_torch(x[:self.num_species])
-        n_p = len(self.params)
+        n_p = len(self.params) + len(self.QoIs_to_vary)
         crow_indices = torch.arange(n_p+2)
         col_indices = torch.arange(n_p+1)
         values = jac_block.tile((n_p+1,1,1))
@@ -195,11 +204,13 @@ class ReactionNetwork:
         xt = torch.from_numpy(x)
         return self.jacobian_sensitivities_torch(xt).to_dense().numpy()
     
+    # TODO: modify this function to contain sensitivities for 
     def sensitivities_rhs_torch(self, x: torch.tensor) -> torch.tensor:
         # takes a vector from torch and does computation
         f = torch.zeros(len(x))
         N = self.num_species
         Np = len(self.params)
+        Nxv = len(self.QoIs_to_vary)
 
         # the first entries of x are the normal rhs of the reaction.
         species = x[:N]
@@ -211,26 +222,52 @@ class ReactionNetwork:
             s = x[l:u]
             f[l:u] = torch.linalg.matmul(self.jacobian_torch(species), s) + \
                     torch.linalg.matmul(torch.tensordot(self.dQ_dp[:,:,:,j], species, dims=([2],[0])) + self.dL_dp[:,:,j], species)
+        for j in range(Np, Np + Nxv):
+            l = (j + 1) * N
+            u = (j + 2) * N
+            s = x[l:u]
+            f[l:u] = torch.linalg.matmul(self.jacobian_torch(species), s)
+        
         return f
     
     def sensitivities_rhs(self, t, x: np.ndarray) -> np.ndarray:
         xt = torch.from_numpy(x)
         return self.sensitivities_rhs_torch(xt).numpy()
     
-    def solve_reaction(self, t_range, x0, t_eval = None):
+
+    def solve_reaction(self,
+        t_range,
+        x0,
+        t_eval = None,
+    ):
+
+        # do not compute sensitivities; no need for anything fancy
         if self.compute_sensitivities == False:
+
             soln = solve_ivp(self.reaction_rhs, t_range, x0, method='LSODA',
                 rtol=1e-10,
                 jac=self.jacobian,
                 max_step=(t_range[1]-t_range[0])/1e3,
                 first_step=0.25,
                 t_eval=t_eval)
+            
+        # If we want to compute sensitivities, we need to know which initial conditions to include.
+        # Assume that every physical parameter is always included.
         elif self.compute_sensitivities == True:
+
             # pad the initial condition with zeros
             zeros = np.zeros(self.num_species)
             x0_padded = x0
             for i in range(len(self.params)):
                 x0_padded = np.concatenate([x0_padded, zeros])
+
+            # depending on what initial conditions we are varying,
+            # we need to include some ones in the correct places.
+            for i in range(len(self.QoIs_to_vary)):
+                zeros = np.zeros(self.num_species)
+                zeros[self.QoIs_to_vary[i]] = 1
+                x0_padded = np.concatenate([x0_padded, zeros])
+
             soln = solve_ivp(self.sensitivities_rhs, t_range, x0_padded, method='LSODA',
                 rtol=1e-10,
                 jac=self.jacobian_sensitivities,
@@ -238,6 +275,7 @@ class ReactionNetwork:
                 first_step=0.25,
                 t_eval=t_eval)
         return soln.t, soln.y
+
 
     def solve_reaction_snapshot(self, x0, tf, QoI):
         if self.compute_sensitivities == False:
