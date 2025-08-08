@@ -292,7 +292,7 @@ def convergence_study(
     N_points = 1000000,
     rel_errs = [0.2, 0.1, 0.05, 0.01, 0.001],
     K = 5,
-    N_init = 10,
+    N_init = 100,
     pdf_name = 'convergence_study_plots.pdf'
 ):
     
@@ -327,61 +327,62 @@ def convergence_study(
         q_test = q_tf[sample_inds[N_train:]]
         dqdp_test = dqdp_tf[sample_inds[N_train:]]
 
-        # for each tolerance,
-        for tol in rel_errs:
-            
-            start_time = time.perf_counter()
+        with PdfPages(pdf_name) as pdf:
 
-            # first for non-gradient model
-            no_gradient_model = AstrochemClusterModel()
-            no_gradient_model.train_model(
-                p_train, QoI, x0, tf,
-                N = N_init,
-                do_clustering = True,
-                error_tol = tol,
-                use_gradient_boost = False,
-                ode_solves = q_train,
-            )
-            N_ng = no_gradient_model.N_clusters
+            # for each tolerance,
+            for tol in rel_errs:
+                
+                start_time = time.perf_counter()
 
-            _, _, fig_g_rel, fig_g_abs = no_gradient_model.test_accuracy(p_test, q_test, 1,
-                    f'Relative Errors (No Gradient), $tol={tol}$, $N={N_ng}$',
-                    print_stats=False, disp_figs=False)
-            # save to pdf
-            with PdfPages(pdf_name) as pdf:
-                pdf.savefig(fig_g_rel)
-                plt.close(fig_g_rel)
-                plt.close(fig_g_abs)
+                # first for non-gradient model
+                if tol >= 0.01: # since it is very slow if we do not do this
+                    no_gradient_model = AstrochemClusterModel()
+                    no_gradient_model.train_model(
+                        p_train, QoI, x0, tf,
+                        N = N_init,
+                        do_clustering = True,
+                        error_tol = tol,
+                        use_gradient_boost = False,
+                        ode_solves = q_train,
+                    )
+                    N_ng = no_gradient_model.N_clusters
 
-            mid_time = time.perf_counter()
-            print(f'Time for no gradient, tol={tol}, attempt {i}: {mid_time-start_time}')
+                    _, _, fig_g_rel, fig_g_abs = no_gradient_model.test_accuracy(p_test, q_test, 1,
+                            f'Relative Errors (No Gradient), $tol={tol}$, $N={N_ng}$',
+                            print_stats=False, disp_figs=False)
+                    # save to pdf
+                    pdf.savefig(fig_g_rel)
+                    plt.close(fig_g_rel)
+                    plt.close(fig_g_abs)
 
-            # then for gradient model
-            gradient_model = AstrochemClusterModel()
-            gradient_model.train_model(
-                p_train, QoI, x0, tf,
-                N = N_init,
-                do_clustering = True,
-                error_tol = tol,
-                use_gradient_boost = True,
-                ode_solves = q_train,
-                sensitivities = dqdp_train
-            )
-            N_g = gradient_model.N_clusters
+                    mid_time = time.perf_counter()
+                    print(f'Time for no gradient, tol={tol}, attempt {i}: {mid_time-start_time} seconds')
 
-            # TODO statistics
-            _, _, fig_ng_rel, fig_ng_abs = gradient_model.test_accuracy(p_test, q_test, 1,
-                    f'Relative Errors (With Gradient), $tol={tol}$, $N={N_g}$',
-                    print_stats=False, disp_figs=False)
-            
-            # save to pdf
-            with PdfPages(pdf_name) as pdf:
+                # then for gradient model
+                gradient_model = AstrochemClusterModel()
+                gradient_model.train_model(
+                    p_train, QoI, x0, tf,
+                    N = N_init,
+                    do_clustering = True,
+                    error_tol = tol,
+                    use_gradient_boost = True,
+                    ode_solves = q_train,
+                    sensitivities = dqdp_train
+                )
+                N_g = gradient_model.N_clusters
+
+                # statistics
+                _, _, fig_ng_rel, fig_ng_abs = gradient_model.test_accuracy(p_test, q_test, 1,
+                        f'Relative Errors (With Gradient), $tol={tol}$, $N={N_g}$',
+                        print_stats=False, disp_figs=False)
+                
+                # save to pdf
                 pdf.savefig(fig_ng_rel)
                 plt.close(fig_ng_rel)
                 plt.close(fig_ng_abs)
 
-            end_time = time.perf_counter()
-            print(f'Time for no gradient, tol={tol}, attempt {i}: {end_time-mid_time}')
+                end_time = time.perf_counter()
+                print(f'Time for with gradient, tol={tol}, attempt {i}: {end_time-mid_time} seconds')
 
 
 
