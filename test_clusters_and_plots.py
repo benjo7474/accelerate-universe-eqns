@@ -289,10 +289,10 @@ def convergence_study(
     input_name = 'data/input_p_full.npy',
     output_name = 'data/output_q_CO_full.npy',
     grads_name = 'data/output_dqdp_CO_full.npy',
-    N_points = 1000000,
+    N_points = 200000,
     rel_errs = [0.2, 0.1, 0.05, 0.01, 0.001],
     K = 5,
-    N_init = 100,
+    N_init = 10,
     pdf_name = 'convergence_study_plots.pdf'
 ):
     
@@ -313,21 +313,23 @@ def convergence_study(
     q_tf = q[:,tf_index]
     dqdp_tf = dqdp[:,:,tf_index]
 
-    # loop over K times and pick training and testing data split
-    for i in range(K):
 
-        N_train = 8 * len(p) // 10
-        sample_inds = np.arange(len(p))
-        np.random.shuffle(sample_inds)
+    with PdfPages(pdf_name) as pdf:
 
-        p_train = p[sample_inds[:N_train]]
-        q_train = q_tf[sample_inds[:N_train]]
-        dqdp_train = dqdp_tf[sample_inds[:N_train]]
-        p_test = p[sample_inds[N_train:]]
-        q_test = q_tf[sample_inds[N_train:]]
-        dqdp_test = dqdp_tf[sample_inds[N_train:]]
+        # loop over K times and pick training and testing data split
+        # we do this because we want to use the same split for different tolerances
+        for i in range(K):
 
-        with PdfPages(pdf_name) as pdf:
+            N_train = 8 * len(p) // 10   # 80 pct of data
+            sample_inds = np.arange(len(p))
+            np.random.shuffle(sample_inds)
+
+            p_train = p[sample_inds[:N_train]]
+            q_train = q_tf[sample_inds[:N_train]]
+            dqdp_train = dqdp_tf[sample_inds[:N_train]]
+            p_test = p[sample_inds[N_train:]]
+            q_test = q_tf[sample_inds[N_train:]]
+            # dqdp_test = dqdp_tf[sample_inds[N_train:]]
 
             # for each tolerance,
             for tol in rel_errs:
