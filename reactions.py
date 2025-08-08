@@ -215,18 +215,19 @@ class ReactionNetwork:
         # the first entries of x are the normal rhs of the reaction.
         species = x[:N]
         f[:N] = self.reaction_rhs_torch(species)
+        jacobian = self.jacobian_torch(species)
         # every other entry is the derivative. Go parameter by parameter
         for j in range(Np):
             l = (j + 1) * N
             u = (j + 2) * N
             s = x[l:u]
-            f[l:u] = torch.linalg.matmul(self.jacobian_torch(species), s) + \
+            f[l:u] = torch.linalg.matmul(jacobian, s) + \
                     torch.linalg.matmul(torch.tensordot(self.dQ_dp[:,:,:,j], species, dims=([2],[0])) + self.dL_dp[:,:,j], species)
         for j in range(Np, Np + Nxv):
             l = (j + 1) * N
             u = (j + 2) * N
             s = x[l:u]
-            f[l:u] = torch.linalg.matmul(self.jacobian_torch(species), s)
+            f[l:u] = torch.linalg.matmul(jacobian, s)
         
         return f
     
