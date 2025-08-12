@@ -289,9 +289,9 @@ def convergence_study(
     input_name = 'data/input_p_full.npy',
     output_name = 'data/output_q_CO_full.npy',
     grads_name = 'data/output_dqdp_CO_full.npy',
-    N_points = 1000000,
-    rel_errs = [0.2, 0.1, 0.05, 0.01, 0.001],
-    K = 5,
+    N_points = 500000,
+    rel_errs = [0.4, 0.2, 0.1, 0.05, 0.025, 0.0125, 0.00625],
+    K = 3,
     N_init = 10,
     pdf_name = 'convergence_study_plots.pdf'
 ):
@@ -340,7 +340,7 @@ def convergence_study(
                 if tol >= 0.01: # since it is very slow if we do not do this
                     no_gradient_model = AstrochemClusterModel()
                     no_gradient_model.train_model(
-                        p_train, QoI, x0, tf,
+                        p_train, QoI, x0, [], tf,
                         N = N_init,
                         do_clustering = True,
                         error_tol = tol,
@@ -363,7 +363,7 @@ def convergence_study(
                 # then for gradient model
                 gradient_model = AstrochemClusterModel()
                 gradient_model.train_model(
-                    p_train, QoI, x0, tf,
+                    p_train, QoI, x0, [], tf,
                     N = N_init,
                     do_clustering = True,
                     error_tol = tol,

@@ -36,7 +36,7 @@ def recursive_cluster_algorithm(
     N: int = 10, # number of initial clusters to split into
     ss: int = 40, # sample size used to compute statistics in each cluster
     use_gradient: bool = False,
-    unpack_log = [False, False, False],
+    unpack_log = [],
     ode_solves: np.ndarray = None, # if this is not none, uses these as solves. Otherwise runs eval_function every time
     gradients: np.ndarray = None # save with these for gradients
     ):
@@ -118,10 +118,11 @@ def recursive_cluster_algorithm(
             else:
                 params_nonlog = np.copy(params_in_cluster)
             centroid_nonlog = np.copy(centroid_params)
-            for l, val in enumerate(unpack_log):
-                if val == True:
-                    params_nonlog[:,l] = 10 ** params_nonlog[:,l]
-                    centroid_nonlog[l] = 10 ** centroid_nonlog[l]
+            if len(unpack_log) > 0:
+                for l, val in enumerate(unpack_log):
+                    if val == True:
+                        params_nonlog[:,l] = 10 ** params_nonlog[:,l]
+                        centroid_nonlog[l] = 10 ** centroid_nonlog[l]
             distance = params_nonlog - centroid_nonlog
             dvec = np.abs(qivec - (qc + np.sum(dqdpc * distance, axis=1)))
 
@@ -150,7 +151,7 @@ def _recursive_cluster_algorithm_helper(
     eval_function: Callable,
     ss: int = 40, # sample size used to compute statistics in each cluster
     use_gradient: bool = False,
-    unpack_log = [False, False, False],
+    unpack_log = [],
     ode_solves: np.ndarray = None,
     gradients: np.ndarray = None, # save with these for gradients
     k: int = 0, # current cluster index (for recursive purposes)
@@ -225,10 +226,11 @@ def _recursive_cluster_algorithm_helper(
         else:
             params_nonlog = np.copy(params_in_cluster_0)
         centroid_nonlog = np.copy(centroid_params)
-        for l, val in enumerate(unpack_log):
-            if val == True:
-                params_nonlog[:,l] = 10 ** params_nonlog[:,l]
-                centroid_nonlog[l] = 10 ** centroid_nonlog[l]
+        if len(unpack_log) > 0:
+            for l, val in enumerate(unpack_log):
+                if val == True:
+                    params_nonlog[:,l] = 10 ** params_nonlog[:,l]
+                    centroid_nonlog[l] = 10 ** centroid_nonlog[l]
         distance = params_nonlog - centroid_nonlog
         dvec = np.abs(qivec - (qc + np.sum(dqdpc * distance, axis=1)))
 
@@ -303,10 +305,11 @@ def _recursive_cluster_algorithm_helper(
         else:
             params_nonlog = np.copy(params_in_cluster_1)
         centroid_nonlog = np.copy(centroid_params)
-        for l, val in enumerate(unpack_log):
-            if val == True:
-                params_nonlog[:,l] = 10 ** params_nonlog[:,l]
-                centroid_nonlog[l] = 10 ** centroid_nonlog[l]
+        if len(unpack_log) > 0:
+            for l, val in enumerate(unpack_log):
+                if val == True:
+                    params_nonlog[:,l] = 10 ** params_nonlog[:,l]
+                    centroid_nonlog[l] = 10 ** centroid_nonlog[l]
         distance = params_nonlog - centroid_nonlog
         dvec = np.abs(qivec - (qc + np.sum(dqdpc * distance, axis=1)))
 
